@@ -1,0 +1,27 @@
+From 9fd78d773578505245b1da960c068d4f0b19100a Mon Sep 17 00:00:00 2001
+From: Emil Tsalapatis <emil@etsalapatis.com>
+Date: Fri, 11 Jul 2025 12:07:47 -0400
+Subject: [PATCH 7/9] clarify comment
+
+---
+ llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+index 04cf62db0..6e95e2f39 100644
+--- a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
++++ b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+@@ -1423,6 +1423,10 @@ Value *AddressSanitizer::memToShadow(Value *Shadow, IRBuilder<> &IRB) {
+ // Instrument memset/memmove/memcpy
+ void AddressSanitizer::instrumentMemIntrinsic(MemIntrinsic *MI,
+                                               RuntimeCallInserter &RTCI) {
++  /* BPF does not currently support memory instrinsics. */
++  if (TargetTriple.isBPF())
++    return;
++
+   InstrumentationIRBuilder IRB(MI);
+   if (isa<MemTransferInst>(MI)) {
+     RTCI.createRuntimeCall(
+-- 
+2.49.0
+

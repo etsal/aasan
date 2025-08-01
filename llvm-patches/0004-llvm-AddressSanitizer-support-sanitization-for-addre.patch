@@ -1,0 +1,69 @@
+From 635a40924d6f1607d7570c035d357265d53b6f7e Mon Sep 17 00:00:00 2001
+From: Emil Tsalapatis <emil@etsalapatis.com>
+Date: Wed, 9 Jul 2025 16:11:27 -0400
+Subject: [PATCH 4/9] [llvm] AddressSanitizer: support sanitization for address
+ spaces in BPF
+
+---
+ .../Instrumentation/AddressSanitizer.cpp      | 23 +++++++++++++++----
+ 1 file changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+index beaee76f7..bc1c305d2 100644
+--- a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
++++ b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+@@ -507,8 +507,8 @@ static ShadowMapping getShadowMapping(const Triple &TargetTriple, int LongSize,
+   bool IsAMDGPU = TargetTriple.isAMDGPU();
+   bool IsHaiku = TargetTriple.isOSHaiku();
+   bool IsWasm = TargetTriple.isWasm();
+-
+   bool IsBPF = TargetTriple.isBPF();
++
+   ShadowMapping Mapping;
+ 
+   Mapping.Scale = kDefaultShadowScale;
+@@ -865,6 +865,7 @@ private:
+   bool GlobalIsLinkerInitialized(GlobalVariable *G);
+   bool isSafeAccess(ObjectSizeOffsetVisitor &ObjSizeVis, Value *Addr,
+                     TypeSize TypeStoreSize) const;
++  bool isSupportedAddrspace(Value *Addr);
+ 
+   /// Helper to cleanup per-function state.
+   struct FunctionStateRAII {
+@@ -1390,6 +1391,19 @@ static bool isUnsupportedAMDGPUAddrspace(Value *Addr) {
+   return false;
+ }
+ 
++bool AddressSanitizer::isSupportedAddrspace(Value *Addr) {
++  Type *PtrTy = cast<PointerType>(Addr->getType()->getScalarType());
++  unsigned int AddrSpace = PtrTy->getPointerAddressSpace();
++
++  if (TargetTriple.isBPF())
++	  return AddrSpace == 1;
++
++  if (TargetTriple.isAMDGPU())
++	  return !isUnsupportedAMDGPUAddrspace(Addr);
++
++  return AddrSpace == 0;
++}
++
+ Value *AddressSanitizer::memToShadow(Value *Shadow, IRBuilder<> &IRB) {
+   // Shadow >> scale
+   Shadow = IRB.CreateLShr(Shadow, Mapping.Scale);
+@@ -1453,10 +1467,9 @@ bool AddressSanitizer::isInterestingAlloca(const AllocaInst &AI) {
+ }
+ 
+ bool AddressSanitizer::ignoreAccess(Instruction *Inst, Value *Ptr) {
+-  // Instrument accesses from different address spaces only for AMDGPU.
+-  Type *PtrTy = cast<PointerType>(Ptr->getType()->getScalarType());
+-  if (PtrTy->getPointerAddressSpace() != 0 &&
+-      !(TargetTriple.isAMDGPU() && !isUnsupportedAMDGPUAddrspace(Ptr)))
++  // Check whether the target supports sanitizing the address space 
++  // of the pointer.
++  if (!isSupportedAddrspace(Ptr))
+     return true;
+ 
+   // Ignore swifterror addresses.
+-- 
+2.49.0
+

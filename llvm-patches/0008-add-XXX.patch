@@ -1,0 +1,24 @@
+From eaeacb7536f8110b8d2d83ebd522531f47738fea Mon Sep 17 00:00:00 2001
+From: Emil Tsalapatis <emil@etsalapatis.com>
+Date: Fri, 11 Jul 2025 12:17:02 -0400
+Subject: [PATCH 8/9] add XXX
+
+---
+ llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+index 6e95e2f39..713296204 100644
+--- a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
++++ b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+@@ -1312,6 +1312,7 @@ AddressSanitizerPass::AddressSanitizerPass(
+ PreservedAnalyses AddressSanitizerPass::run(Module &M,
+                                             ModuleAnalysisManager &MAM) {
+ 
++  // XXX Remove. The switch we are adding should be enough.
+   assert(ClAddrSpaces.empty() || (!ClGlobals && !ClStack) || 
+ 	"Address space allowlist incompatible with globals and stack sanitization");
+ 
+-- 
+2.49.0
+

@@ -1,0 +1,25 @@
+From 43e97d508f31656ed7090b7ff49d813de38c57f7 Mon Sep 17 00:00:00 2001
+From: Emil Tsalapatis <emil@etsalapatis.com>
+Date: Wed, 9 Jul 2025 16:33:58 -0400
+Subject: [PATCH 6/9] clarify condition
+
+---
+ llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+index 8a883d62d..04cf62db0 100644
+--- a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
++++ b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+@@ -1312,7 +1312,7 @@ AddressSanitizerPass::AddressSanitizerPass(
+ PreservedAnalyses AddressSanitizerPass::run(Module &M,
+                                             ModuleAnalysisManager &MAM) {
+ 
+-  assert(ClAddrSpaces.empty() || !(ClGlobals || ClStack) || 
++  assert(ClAddrSpaces.empty() || (!ClGlobals && !ClStack) || 
+ 	"Address space allowlist incompatible with globals and stack sanitization");
+ 
+   // Return early if nosanitize_address module flag is present for the module.
+-- 
+2.49.0
+

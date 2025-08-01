@@ -1,0 +1,25 @@
+From debe085c7a9c9dd9b5229913d87f8f9510cde78b Mon Sep 17 00:00:00 2001
+From: Emil Tsalapatis <emil@etsalapatis.com>
+Date: Thu, 31 Jul 2025 23:30:53 -0400
+Subject: [PATCH 9/9] clang: enable address sanitizer for eBPF
+
+---
+ clang/lib/Driver/ToolChain.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/clang/lib/Driver/ToolChain.cpp b/clang/lib/Driver/ToolChain.cpp
+index 571ac53f4..e3fe7b16f 100644
+--- a/clang/lib/Driver/ToolChain.cpp
++++ b/clang/lib/Driver/ToolChain.cpp
+@@ -1601,6 +1601,8 @@ SanitizerMask ToolChain::getSupportedSanitizers() const {
+     Res |= SanitizerKind::ShadowCallStack;
+   if (getTriple().isAArch64(64))
+     Res |= SanitizerKind::MemTag;
++  if (getTriple().isBPF())
++    Res |= SanitizerKind::Address;
+   return Res;
+ }
+ 
+-- 
+2.49.0
+

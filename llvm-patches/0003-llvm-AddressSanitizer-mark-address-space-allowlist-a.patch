@@ -1,0 +1,46 @@
+From 3343995e8847a762965042f9653421b271c92c5d Mon Sep 17 00:00:00 2001
+From: Emil Tsalapatis <emil@etsalapatis.com>
+Date: Wed, 2 Jul 2025 16:38:13 -0400
+Subject: [PATCH 3/9] [llvm] AddressSanitizer: mark address space allowlist and
+ globals/stack sanitization as mutually exclusive
+
+---
+ llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+index 3b307be20..beaee76f7 100644
+--- a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
++++ b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+@@ -119,7 +119,7 @@ static const uint64_t kNetBSDKasan_ShadowOffset64 = 0xdfff900000000000;
+ static const uint64_t kPS_ShadowOffset64 = 1ULL << 40;
+ static const uint64_t kWindowsShadowOffset32 = 3ULL << 28;
+ static const uint64_t kWebAssemblyShadowOffset = 0;
+-static const uint64_t kBPFShadowOffset = 7 << 27;
++static const uint64_t kBPFArenaShadowOffset = 7 << 27;
+ 
+ // The shadow memory space is dynamically allocated.
+ static const uint64_t kWindowsShadowOffset64 = kDynamicShadowSentinel;
+@@ -585,7 +585,7 @@ static ShadowMapping getShadowMapping(const Triple &TargetTriple, int LongSize,
+       Mapping.Offset = (kSmallX86_64ShadowOffsetBase &
+                         (kSmallX86_64ShadowOffsetAlignMask << Mapping.Scale));
+     else if (IsBPF)
+-      Mapping.Offset = kBPFShadowOffset;
++      Mapping.Offset = kBPFArenaShadowOffset;
+     else
+       Mapping.Offset = kDefaultShadowOffset64;
+   }
+@@ -1311,6 +1311,10 @@ AddressSanitizerPass::AddressSanitizerPass(
+ 
+ PreservedAnalyses AddressSanitizerPass::run(Module &M,
+                                             ModuleAnalysisManager &MAM) {
++
++  assert(ClAddrSpaces.empty() || !(ClGlobals || ClStack) || 
++	"Address space allowlist incompatible with globals and stack sanitization");
++
+   // Return early if nosanitize_address module flag is present for the module.
+   // This implies that asan pass has already run before.
+   if (checkIfAlreadyInstrumented(M, "nosanitize_address"))
+-- 
+2.49.0
+

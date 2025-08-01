@@ -1,0 +1,67 @@
+From 4befad5662199aa1b4897c556f185f657fd7d837 Mon Sep 17 00:00:00 2001
+From: Emil Tsalapatis <emil@etsalapatis.com>
+Date: Wed, 9 Jul 2025 16:15:01 -0400
+Subject: [PATCH 5/9] [llvm] AddressSanitizer: use option for per-address space
+ instrumentation
+
+---
+ .../Instrumentation/AddressSanitizer.cpp           | 14 ++++++--------
+ 1 file changed, 6 insertions(+), 8 deletions(-)
+
+diff --git a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+index bc1c305d2..8a883d62d 100644
+--- a/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
++++ b/llvm/lib/Transforms/Instrumentation/AddressSanitizer.cpp
+@@ -865,7 +865,6 @@ private:
+   bool GlobalIsLinkerInitialized(GlobalVariable *G);
+   bool isSafeAccess(ObjectSizeOffsetVisitor &ObjSizeVis, Value *Addr,
+                     TypeSize TypeStoreSize) const;
+-  bool isSupportedAddrspace(Value *Addr);
+ 
+   /// Helper to cleanup per-function state.
+   struct FunctionStateRAII {
+@@ -1386,17 +1385,18 @@ static bool GlobalWasGeneratedByCompiler(GlobalVariable *G) {
+ static bool isUnsupportedAMDGPUAddrspace(Value *Addr) {
+   Type *PtrTy = cast<PointerType>(Addr->getType()->getScalarType());
+   unsigned int AddrSpace = PtrTy->getPointerAddressSpace();
++  // Globals in address space 1 and 4 are supported for AMDGPU.
+   if (AddrSpace == 3 || AddrSpace == 5)
+     return true;
+   return false;
+ }
+ 
+-bool AddressSanitizer::isSupportedAddrspace(Value *Addr) {
++static bool isSupportedAddrspace(const Triple &TargetTriple, Value *Addr) {
+   Type *PtrTy = cast<PointerType>(Addr->getType()->getScalarType());
+   unsigned int AddrSpace = PtrTy->getPointerAddressSpace();
+ 
+-  if (TargetTriple.isBPF())
+-	  return AddrSpace == 1;
++  if (!ClAddrSpaces.empty())
++	  return std::find(ClAddrSpaces.begin(), ClAddrSpaces.end(), AddrSpace) != ClAddrSpaces.end();
+ 
+   if (TargetTriple.isAMDGPU())
+ 	  return !isUnsupportedAMDGPUAddrspace(Addr);
+@@ -1469,7 +1469,7 @@ bool AddressSanitizer::isInterestingAlloca(const AllocaInst &AI) {
+ bool AddressSanitizer::ignoreAccess(Instruction *Inst, Value *Ptr) {
+   // Check whether the target supports sanitizing the address space 
+   // of the pointer.
+-  if (!isSupportedAddrspace(Ptr))
++  if (!isSupportedAddrspace(TargetTriple, Ptr))
+     return true;
+ 
+   // Ignore swifterror addresses.
+@@ -2109,9 +2109,7 @@ bool ModuleAddressSanitizer::shouldInstrumentGlobal(GlobalVariable *G) const {
+     return false;
+   if (!Ty->isSized()) return false;
+   if (!G->hasInitializer()) return false;
+-  // Globals in address space 1 and 4 are supported for AMDGPU.
+-  if (G->getAddressSpace() &&
+-      !(TargetTriple.isAMDGPU() && !isUnsupportedAMDGPUAddrspace(G)))
++  if (!isSupportedAddrspace(TargetTriple, G))
+     return false;
+   if (GlobalWasGeneratedByCompiler(G)) return false; // Our own globals.
+   // Two problems with thread-locals:
+-- 
+2.49.0
+
