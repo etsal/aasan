@@ -24,6 +24,12 @@ int arena_selftest(void)
 		return ret;
 	}
 
+	ret = scx_selftest_buddy();
+	if (ret) {
+		bpf_printk("scx_selftest_buddy failed with %d", ret);
+		return ret;
+	}
+
 	ret = scx_selftest_lvqueue();
 	if (ret) {
 		bpf_printk("scx_selftest_lvqueue failed with %d", ret);
