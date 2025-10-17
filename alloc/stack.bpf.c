@@ -77,7 +77,6 @@ void __arena *scx_stk_pop(struct scx_stk *stack)
 
 	ridx -= 1;
 
-
 	stack->current = stk_seg;
 	stack->cind = ridx;
 
@@ -242,8 +241,8 @@ int scx_stk_fill_new_elems(struct scx_stk *stack)
 	if (!ret)
 		return 0;
 
-	/* If we haven't set aside any memory from before, allocate. */
-	if (!stack->reserve) {
+	/* If we haven't set aside enough memory from before, allocate. */
+	if (!stack->reserve || !stack->reserve->next) {
 		/* This call drops and retakes the lock. */
 		ret = scx_stk_get_arena_memory(stack, nr_pages, nstk_segs);
 		if (ret)
