@@ -77,13 +77,12 @@ Basic functionality
     - buddy allocator (generic power-of-2 objects)
 - [A] Separating the allocator codebases
 - [T] Selftest stubs for the allocators
-
--> WE ARE HERE
-
 - [A] Adding allocator destructors for testing
-    - allocate a page
     - track static alloc allocated blocks to free on destroy()
-
+==================> WE ARE HERE
+    - free pages in stack allocator on destroy()
+- [T] Initial testing for allocator
+    - static: Alloc/fill, alloc/fill, check, alloc/fill, check, etc.
 - [M] Stubs for all compiler-generated methods, will be filled in
 during development
 - [M] ASAN intrinsics - [generic.c]
