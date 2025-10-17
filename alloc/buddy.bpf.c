@@ -230,6 +230,27 @@ int scx_buddy_init(struct scx_buddy *buddy, size_t size)
 	return chunk ? 0 : -ENOMEM;
 }
 
+/*
+ * Destroy the allocator. This does not check whether there are any allocations
+ * currently in use, so any pages being accessed will start taking arena faults.
+ * We do not take a lock because we are freeing arena pages, and nobody should
+ * be using the allocator at that point in the execution.
+ */
+__weak
+int scx_buddy_destroy(struct scx_buddy *buddy, size_t size)
+{
+	/* 
+	 * XXX Go to every chunk and free it back to the stack
+	 * allocator. 
+	 */
+
+	/* XXX scx_stk_destroy(&buddy->stack); */
+
+	buddy->min_alloc_bytes = 0;
+
+	return 0;
+}
+
 __weak
 u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t *chunk, int order_req)
 {

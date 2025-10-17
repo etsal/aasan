@@ -54,10 +54,12 @@ struct scx_buddy {
 #ifdef __BPF__
 
 int scx_buddy_init(struct scx_buddy *buddy, size_t size);
+int scx_buddy_destroy(struct scx_buddy *buddy, size_t size);
 void scx_buddy_free_internal(struct scx_buddy *buddy, u64 free);
 #define scx_buddy_free(buddy, ptr) do { scx_buddy_free_internal((buddy), (u64)(ptr)); } while (0)
 u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size);
 #define scx_buddy_alloc(alloc, size) ((void __arena *)scx_buddy_alloc_internal((alloc), (size)))
+int scx_buddy_destroy(struct scx_buddy *buddy, size_t size);
 
 
 #endif /* __BPF__  */
