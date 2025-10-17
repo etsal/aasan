@@ -29,12 +29,6 @@ int scx_stk_init(struct scx_stk *stack, __u64 data_size, __u64 nr_pages_per_allo
 	stack->data_size = data_size;
 	stack->nr_pages_per_alloc = nr_pages_per_alloc;
 
-	stack->lock = scx_static_alloc(sizeof(*stack->lock), 1);
-	if (!stack->lock) {
-		bpf_printk("failed to allocate lock");
-		return -ENOMEM;
-	}
-
 	return 0;
 }
 
@@ -167,14 +161,11 @@ int scx_stk_free_internal(struct scx_stk *stack, __u64 elem)
 	if (!stack)
 		return -EINVAL;
 
-	if ((ret = arena_spin_lock(stack->lock))) {
-		bpf_printk("spinlock error %d", ret);
-		return ret;
-	}
+	bpf_spin_lock(&stack->lock);
 
 	ret = scx_stk_free_unlocked(stack, (void __arena *)elem);
 
-	arena_spin_unlock(stack->lock);
+	bpf_spin_unlock(&stack->lock);
 
 	return ret;
 }
@@ -183,10 +174,10 @@ static
 int scx_stk_get_arena_memory(struct scx_stk *stack, __u64 nr_pages, __u64 nstk_segs)
 {
 	scx_stk_seg_t *stk_seg;
-	int ret, i;
 	u64 mem;
+	int i;
 
-	arena_spin_unlock(stack->lock);
+	bpf_spin_unlock(&stack->lock);
 
 	/*
 	 * The code allocates new memory only as segments. The allocation and
@@ -197,9 +188,7 @@ int scx_stk_get_arena_memory(struct scx_stk *stack, __u64 nr_pages, __u64 nstk_s
 	 */
 
 	/*
-	 * On error, we return with the segment buffer unlocked. This is
-	 * because arena_spin_lock can fail, so we cannot guarantee we
-	 * can lock it back.
+	 * On error, we return with the segment buffer unlocked.
 	 */
 	if (!stack)
 		return -EINVAL;
@@ -208,11 +197,7 @@ int scx_stk_get_arena_memory(struct scx_stk *stack, __u64 nr_pages, __u64 nstk_s
 	if (!mem)
 		return -ENOMEM;
 
-	if ((ret = arena_spin_lock(stack->lock))) {
-		bpf_arena_free_pages(&arena, (void __arena *)mem, nr_pages);
-		bpf_printk("spinlock error %d", ret);
-		return ret;
-	}
+	bpf_spin_lock(&stack->lock);
 
 	_Static_assert(sizeof(struct scx_stk_seg) <= PAGE_SIZE,
 		"segment must fit into a page");
@@ -241,7 +226,7 @@ int scx_stk_fill_new_elems(struct scx_stk *stack)
 	nr_pages = stack->nr_pages_per_alloc;
 	nelems = (nr_pages * PAGE_SIZE) / stack->data_size;
 	if (nelems > SCX_STK_SEG_MAX) {
-		arena_spin_unlock(stack->lock);
+		bpf_spin_unlock(&stack->lock);
 		bpf_printk("new elements must fit into a single segment");
 		return -EINVAL;
 	}
@@ -290,7 +275,7 @@ int scx_stk_fill_new_elems(struct scx_stk *stack)
 	for (i = zero; i < nelems && can_loop; i++) {
 		ret = scx_stk_push(stack, (void __arena *)mem);
 		if (ret) {
-			arena_spin_unlock(stack->lock);
+			bpf_spin_unlock(&stack->lock);
 			return ret;
 		}
 		mem += stack->data_size;
@@ -310,10 +295,7 @@ __u64 scx_stk_alloc(struct scx_stk *stack)
 		return 0ULL;
 	}
 
-	if ((ret = arena_spin_lock(stack->lock))) {
-		bpf_printk("spinlock error %d", ret);
-		return 0ULL;
-	}
+	bpf_spin_lock(&stack->lock);
 
 	/* If segment buffer is empty, we have to populate it. */
 	if (stack->available == 0) {
@@ -326,7 +308,7 @@ __u64 scx_stk_alloc(struct scx_stk *stack)
 	}
 
 	elem = scx_stk_pop(stack);
-	arena_spin_unlock(stack->lock);
+	bpf_spin_unlock(&stack->lock);
 
 	return (u64)elem;
 }
