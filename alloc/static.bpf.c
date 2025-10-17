@@ -18,7 +18,7 @@
 
 #include <alloc/static.h>
 
-extern struct bpf_spin_lock alloc_lock;
+private(STATIC_ALLOC) struct bpf_spin_lock static_lock;
 
 struct scx_static scx_static;
 
@@ -31,7 +31,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	size_t padding;
 	u64 addr;
 
-	bpf_spin_lock(&alloc_lock);
+	bpf_spin_lock(&static_lock);
 
 	/* Round up the current offset. */
 	addr = (__u64) scx_static.memory + scx_static.off;
@@ -40,7 +40,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	alloc_bytes = bytes + padding;
 
 	if (alloc_bytes > scx_static.max_alloc_bytes) {
-		bpf_spin_unlock(&alloc_lock);
+		bpf_spin_unlock(&static_lock);
 		bpf_printk("invalid request %ld, max is %ld\n", alloc_bytes,
 			      scx_static.max_alloc_bytes);
 		return (u64)NULL;
@@ -55,7 +55,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	if (scx_static.off + alloc_bytes > scx_static.max_alloc_bytes) {
 		old = scx_static.memory;
 
-		bpf_spin_unlock(&alloc_lock);
+		bpf_spin_unlock(&static_lock);
 
 		/*
 		 * No free operation so just forget about the previous
@@ -68,11 +68,11 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 		if (!memory)
 			return (u64)NULL;
 
-		bpf_spin_lock(&alloc_lock);
+		bpf_spin_lock(&static_lock);
 
 		/* Error out if we raced with another allocation. */
 		if (scx_static.memory != old) {
-			bpf_spin_unlock(&alloc_lock);
+			bpf_spin_unlock(&static_lock);
 			bpf_arena_free_pages(&arena, memory, scx_static.max_alloc_bytes);
 
 			bpf_printk("concurrent static memory allocations unsupported");
@@ -97,7 +97,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	ptr = (void __arena *)(addr + padding);
 	scx_static.off += alloc_bytes;
 
-	bpf_spin_unlock(&alloc_lock);
+	bpf_spin_unlock(&static_lock);
 
 	return (u64)ptr;
 }
@@ -112,14 +112,13 @@ int scx_static_init(size_t alloc_pages)
 	if (!memory)
 		return -ENOMEM;
 
-	bpf_spin_lock(&alloc_lock);
+	bpf_spin_lock(&static_lock);
 	scx_static = (struct scx_static) {
 		.max_alloc_bytes = max_bytes,
 		.off = 0,
 		.memory = memory,
 	};
-	bpf_spin_unlock(&alloc_lock);
+	bpf_spin_unlock(&static_lock);
 
 	return 0;
 }
-
