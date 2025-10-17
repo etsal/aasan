@@ -23,7 +23,6 @@ u64 scx_bitmap_alloc_internal(void);
 int scx_bitmap_free(scx_bitmap_t __arg_arena mask);
 
 int scx_bitmap_copy_to_stack(struct scx_bitmap *dst, scx_bitmap_t __arg_arena src);
-int scx_bitmap_to_bpf(struct bpf_cpumask __kptr *bpfmask __arg_trusted, scx_bitmap_t __arg_arena scx_bitmap);
 
 int scx_bitmap_set_cpu(u32 cpu, scx_bitmap_t __arg_arena mask);
 int scx_bitmap_clear_cpu(u32 cpu, scx_bitmap_t __arg_arena mask);
@@ -36,7 +35,6 @@ int scx_bitmap_or(scx_bitmap_t __arg_arena dst, scx_bitmap_t __arg_arena src1, s
 bool scx_bitmap_empty(scx_bitmap_t __arg_arena mask);
 int scx_bitmap_copy(scx_bitmap_t __arg_arena dst, scx_bitmap_t __arg_arena src);
 
-int scx_bitmap_from_bpf(scx_bitmap_t __arg_arena scx_bitmap, const cpumask_t *bpfmask __arg_trusted);
 int scx_bitmap_and_cpumask(scx_bitmap_t dst __arg_arena, scx_bitmap_t scx __arg_arena,
 			       const struct cpumask *bpf __arg_trusted);
 

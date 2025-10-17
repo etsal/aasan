@@ -174,20 +174,6 @@ int scx_bitmap_copy(scx_bitmap_t __arg_arena dst, scx_bitmap_t __arg_arena src)
 	return 0;
 }
 
-__weak int
-scx_bitmap_from_bpf(scx_bitmap_t __arg_arena scx_bitmap, const cpumask_t *bpfmask __arg_trusted)
-{
-	int i;
-
-	for (i = 0; i < sizeof(cpumask_t) / 8 && can_loop; i++) {
-		if (i >= mask_size)
-			break;
-		scx_bitmap->bits[i] = bpfmask->bits[i];
-	}
-
-	return 0;
-}
-
 __weak
 bool scx_bitmap_subset(scx_bitmap_t __arg_arena big, scx_bitmap_t __arg_arena small)
 {
