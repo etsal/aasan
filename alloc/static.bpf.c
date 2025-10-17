@@ -22,10 +22,17 @@ private(STATIC_ALLOC) struct bpf_spin_lock static_lock;
 
 struct scx_static scx_static;
 
+struct scx_ll;
+struct scx_ll {
+	struct scx_ll __arena *next;
+};
+typedef struct scx_ll __arena scx_ll_t;
+
 __weak
 u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 {
 	void __arena *memory, *old;
+	scx_ll_t *oldll, *newll;
 	size_t alloc_bytes;
 	void __arena *ptr;
 	size_t padding;
@@ -79,12 +86,17 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 			return (u64)NULL;
 		}
 
+		/* Keep a list of allocated blocks to free on allocator destruction. */
+		oldll = (scx_ll_t *)old;
+		newll = (scx_ll_t *)memory;
+		newll->next = oldll;
+
 		/*
 		 * Switch to new memory block, reset offset,
 		 * and recalculate base address.
 		 */
 		scx_static.memory = memory;
-		scx_static.off = 0;
+		scx_static.off = sizeof(*newll);
 		addr = (__u64) scx_static.memory + scx_static.off;
 
 		/*
@@ -103,19 +115,41 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 }
 
 __weak
+int scx_static_destroy(void)
+{ 
+	size_t alloc_pages = scx_static.max_alloc_bytes / PAGE_SIZE;
+	scx_ll_t *ll, *llnext;
+
+	for(ll = scx_static.memory; ll && can_loop; ll = llnext) {
+		llnext = ll;
+		bpf_arena_free_pages(&arena, ll, alloc_pages);
+	}
+
+	__builtin_memset(&scx_static, 0, sizeof(scx_static));
+
+	return 0;
+}
+
+__weak
 int scx_static_init(size_t alloc_pages)
 {
 	size_t max_bytes = alloc_pages * PAGE_SIZE;
 	void __arena *memory;
+	scx_ll_t *ll;
 
 	memory = bpf_arena_alloc_pages(&arena, NULL, alloc_pages, NUMA_NO_NODE, 0);
 	if (!memory)
 		return -ENOMEM;
 
+	ll = (scx_ll_t *)memory;
+	ll->next = NULL;
+
 	bpf_spin_lock(&static_lock);
+
+	/* We reserve sizeof(*ll) for the embedded linked list. */
 	scx_static = (struct scx_static) {
 		.max_alloc_bytes = max_bytes,
-		.off = 0,
+		.off = sizeof(*ll),
 		.memory = memory,
 	};
 	bpf_spin_unlock(&static_lock);
