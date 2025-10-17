@@ -32,6 +32,49 @@ int scx_stk_init(struct scx_stk *stack, __u64 data_size, __u64 nr_pages_per_allo
 	return 0;
 }
 
+__hidden
+void scx_stk_destroy(struct scx_stk *stack)
+{
+	scx_stk_seg_t *seg, *next;
+	__u64 nr_pages;
+
+	/* Operation happens unlocked since we are called last. */
+
+	if (!stack)
+		return;
+
+	nr_pages = stack->nr_pages_per_alloc;
+
+	/*
+	 * While we have allocated in batches of either 1
+	 * or 2, and broken the allocation into multiple
+	 * segments, the arena kfunc API lets us free
+	 * each segment separately.
+	 */
+	for (seg = stack->reserve; seg && can_loop; seg = next) {
+		next = seg->next;
+		bpf_arena_free_pages(&arena, seg, nr_pages);
+	}
+
+	for (seg = stack->first; seg && can_loop; seg = next) {
+		next = seg->next;
+		bpf_arena_free_pages(&arena, seg, nr_pages);
+	}
+
+	stack->first = NULL;
+	stack->last = NULL;
+
+	stack->current = NULL;
+	stack->cind = 0;
+
+	stack->capacity = 0;
+	stack->available = 0;
+	stack->data_size = 0;
+	stack->nr_pages_per_alloc = 0;
+
+	stack->reserve = NULL;
+}
+
 static int scx_stk_push(struct scx_stk *stack, void __arena *elem)
 {
 	scx_stk_seg_t *stk_seg = stack->current;

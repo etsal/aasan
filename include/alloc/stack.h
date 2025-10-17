@@ -43,6 +43,7 @@ struct scx_stk {
 
 u64 scx_stk_alloc(struct scx_stk *stack);
 int scx_stk_init(struct scx_stk *stackp, __u64 data_size, __u64 nr_pages_per_alloc);
+void scx_stk_destroy(struct scx_stk *stack);
 int scx_stk_free_internal(struct scx_stk *stack, __u64 elem);
 
 #define scx_stk_free(stack, elem) scx_stk_free_internal(stack, (__u64)elem)
