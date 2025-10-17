@@ -71,7 +71,19 @@ Some observations:
 Basic functionality
 -------------------
 
-- [A] Basic buddy allocator prototype
+- [A] Basic allocator prototype(s)
+    - static allocator (no frees)
+    - stack allocator (page granularity)
+    - buddy allocator (generic power-of-2 objects)
+- [A] Separating the allocator codebases
+- [T] Selftest stubs for the allocators
+
+-> WE ARE HERE
+
+- [A] Adding allocator destructors for testing
+    - allocate a page
+    - track static alloc allocated blocks to free on destroy()
+
 - [M] Stubs for all compiler-generated methods, will be filled in
 during development
 - [M] ASAN intrinsics - [generic.c]
