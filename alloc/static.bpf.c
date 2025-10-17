@@ -15,8 +15,8 @@
 
 #include <scx/common.bpf.h>
 #include <lib/arena_map.h>
-#include <lib/sdt_task.h>
-#include <lib/static.bpf.h>
+
+#include <alloc/static.h>
 
 extern struct bpf_spin_lock alloc_lock;
 

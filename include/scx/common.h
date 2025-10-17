@@ -26,10 +26,13 @@ typedef int16_t s16;
 typedef int32_t s32;
 typedef int64_t s64;
 
-/* not available when building kernel tools/sched_ext */
-#if __has_include(<lib/sdt_task_defs.h>)
-#include "bpf_arena_common.h"
-#include <lib/sdt_task_defs.h>
+#ifndef div_round_up
+#define div_round_up(a, b) (((a) + (b) - 1) / (b))
 #endif
 
+#ifndef round_up
+#define round_up(a, b) (div_round_up((a), (b)) * (b))
+#endif
+
+/* not available when building kernel tools/sched_ext */
 #endif	/* __SCHED_EXT_COMMON_H */

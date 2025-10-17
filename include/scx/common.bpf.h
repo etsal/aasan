@@ -288,4 +288,12 @@ int scx_ffs(__u64 word)
 	return num;
 }
 
+#ifndef div_round_up
+#define div_round_up(a, b) (((a) + (b) - 1) / (b))
+#endif
+
+#ifndef round_up
+#define round_up(a, b) (div_round_up((a), (b)) * (b))
+#endif
+
 #endif	/* __SCX_COMMON_BPF_H */

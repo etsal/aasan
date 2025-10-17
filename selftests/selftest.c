@@ -24,7 +24,10 @@
 #include <lib/atq.h>
 #include <lib/arena.h>
 #include <lib/sdt_task.h>
-#include <lib/static.bpf.h>
+
+#include <alloc/static.h>
+#include <alloc/stack.h>
+#include <alloc/buddy.h>
 
 #include "selftest.skel.h"
 
