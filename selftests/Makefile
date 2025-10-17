@@ -1,6 +1,9 @@
 .PHONY: clean test
-BPF_SOURCES = $(wildcard ../lib/*.bpf.c) $(wildcard *.bpf.c)
+
+BPF_SOURCES = $(wildcard ../alloc/*.bpf.c) $(wildcard ../lib/*.bpf.c) $(wildcard *.bpf.c)
 BPF_OBJECTS = $(notdir $(BPF_SOURCES:.bpf.c=.bpf.o))
+vpath %.bpf.c ../alloc ../lib .
+
 BPFTOOL=bpftool
 
 INCLUDES=-I../include -I../include/arch -I ../include/arch/bpf-compat
@@ -30,13 +33,7 @@ selftest.skel.h: main.bpf.o
 main.bpf.o: $(BPF_OBJECTS)
 	$(BPFTOOL) gen object $@ $^
 
-selftest.bpf.o: selftest.bpf.c
-	clang $(BPF_FLAGS) -c $< -o $@
-
-st_%.bpf.o: st_%.bpf.c
-	clang $(BPF_FLAGS) -c $< -o $@
-
-%.bpf.o: ../lib/%.bpf.c
+%.bpf.o: %.bpf.c
 	clang $(BPF_FLAGS) -c $< -o $@
 		
 clean:
