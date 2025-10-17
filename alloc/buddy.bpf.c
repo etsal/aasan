@@ -239,13 +239,25 @@ int scx_buddy_init(struct scx_buddy *buddy, size_t size)
 __weak
 int scx_buddy_destroy(struct scx_buddy *buddy, size_t size)
 {
-	/* 
-	 * XXX Go to every chunk and free it back to the stack
-	 * allocator. 
+	scx_buddy_chunk_t *chunk, *next;
+
+	if (!buddy)
+		return -EINVAL;
+
+	/*
+	 * Traverse all buddy chunks and free them back to the arena
+	 * with the same granularity they were allocated with.
 	 */
+	for (chunk = buddy->first_chunk; chunk && can_loop; chunk = next) {
+		next = chunk->next;
+		bpf_arena_free_pages(&arena, chunk, SCX_BUDDY_CHUNK_PAGES);
+	}
 
-	/* XXX scx_stk_destroy(&buddy->stack); */
+	/* Destroy the underlying stack allocator. */
+	scx_stk_destroy(&buddy->stack);
 
+	/* Clear all fields. */
+	buddy->first_chunk = NULL;
 	buddy->min_alloc_bytes = 0;
 
 	return 0;
