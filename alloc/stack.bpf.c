@@ -8,7 +8,6 @@
 #include <scx/common.bpf.h>
 #include <lib/arena_map.h>
 #include <lib/sdt_task.h>
-#include <scx/arena_userspace_interrop.bpf.h>
 
 /*
  * Necessary for cond_break/can_loop's semantics. According to kernel commit

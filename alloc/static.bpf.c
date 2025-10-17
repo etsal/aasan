@@ -17,7 +17,6 @@
 #include <lib/arena_map.h>
 #include <lib/sdt_task.h>
 #include <lib/static.bpf.h>
-#include <scx/arena_userspace_interrop.bpf.h>
 
 extern struct bpf_spin_lock alloc_lock;
 
