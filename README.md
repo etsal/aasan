@@ -79,8 +79,9 @@ Basic functionality
 - [T] Selftest stubs for the allocators
 - [A] Adding allocator destructors for testing
     - track static alloc allocated blocks to free on destroy()
+    - free all stack segments in stack allocator on destroy()
+    - destroy buddy allocator chunks on destroy()
 ==================> WE ARE HERE
-    - free pages in stack allocator on destroy()
 - [T] Initial testing for allocator
     - static: Alloc/fill, alloc/fill, check, alloc/fill, check, etc.
 - [M] Stubs for all compiler-generated methods, will be filled in
