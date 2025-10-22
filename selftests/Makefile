@@ -37,4 +37,4 @@ main.bpf.o: $(BPF_OBJECTS)
 	clang $(BPF_FLAGS) -c $< -o $@
 		
 clean:
-	rm -f *.skel.h *.bpf.o
+	rm -f *.skel.h *.bpf.o selftest
