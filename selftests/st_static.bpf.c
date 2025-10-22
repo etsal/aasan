@@ -23,6 +23,7 @@
 #define ST_PATTERN1		0xAA
 #define ST_PATTERN2		0x55
 
+#define ST_EXHAUST_ALLOCS	16
 #define ST_WRAP_PAGES		4
 #define ST_WRAP_BYTES		2048
 
@@ -220,25 +221,22 @@ int scx_selftest_static_alloc_exhaustion(u64 bytes, u64 alignment)
 	void __arena *mem;
 	int i;
 
-	INIT_OR_FAIL(bytes);
+	INIT_OR_FAIL(PAGE_SIZE);
 
 	/* Make an unfullfilable allocation. */
 	mem = scx_static_alloc(bytes + 1, 1);
 	if (mem) {
 		bpf_printk("%s:%d scx_static_alloc succeeded", __func__, __LINE__);
-		bpf_printk("%s:%d %d scx_static_alloc succeeded", __func__, __LINE__, mem);
 		scx_static_destroy();
 		return -EINVAL;
 	}
 
-	for (i = 0; i < allocs && can_loop; i++) {
-		bpf_printk("%d %d", padded, i);
-		ALLOC_OR_FAIL(padded, 1);
-	}
+	for (i = 0; i < allocs && can_loop; i++)
+		ALLOC_OR_FAIL(padded, alignment);
 
 	mem = scx_static_alloc(bytes, alignment);
 	if (mem) {
-		bpf_printk("%s:%d %d scx_static_alloc succeeded", __func__, __LINE__, mem);
+		bpf_printk("%s:%d scx_static_alloc succeeded", __func__, __LINE__);
 		scx_static_destroy();
 		return -EINVAL;
 	}
@@ -264,7 +262,7 @@ int scx_selftest_static(void)
 	}
 	
 	SCX_STATIC_SELFTEST(alloc_aligned);
-	SCX_STATIC_SELFTEST(alloc_exhaustion, bytes, alignment);
+	SCX_STATIC_SELFTEST(alloc_exhaustion, bytes, PAGE_SIZE / 2);
 
 	return 0;
 }

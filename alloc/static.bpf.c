@@ -46,10 +46,10 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	padding = round_up(addr, alignment) - addr;
 	alloc_bytes = bytes + padding;
 
-	if (alloc_bytes > scx_static.max_alloc_bytes) {
+	if (alloc_bytes > scx_static.max_contig_bytes) {
 		bpf_spin_unlock(&static_lock);
 		bpf_printk("invalid request %ld, max is %ld\n", alloc_bytes,
-			      scx_static.max_alloc_bytes);
+			      scx_static.max_contig_bytes);
 		return (u64)NULL;
 	}
 
@@ -59,7 +59,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	 * size, so it does not attempt to alleviate memory
 	 * fragmentation.
 	 */
-	if (scx_static.off + alloc_bytes > scx_static.max_alloc_bytes) {
+	if (scx_static.off + alloc_bytes > scx_static.max_contig_bytes) {
 		old = scx_static.memory;
 
 		bpf_spin_unlock(&static_lock);
@@ -70,7 +70,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 		 */
 
 		memory = bpf_arena_alloc_pages(&arena, NULL,
-					       scx_static.max_alloc_bytes / PAGE_SIZE,
+					       scx_static.max_contig_bytes / PAGE_SIZE,
 					       NUMA_NO_NODE, 0);
 		if (!memory)
 			return (u64)NULL;
@@ -80,7 +80,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 		/* Error out if we raced with another allocation. */
 		if (scx_static.memory != old) {
 			bpf_spin_unlock(&static_lock);
-			bpf_arena_free_pages(&arena, memory, scx_static.max_alloc_bytes);
+			bpf_arena_free_pages(&arena, memory, scx_static.max_contig_bytes);
 
 			bpf_printk("concurrent static memory allocations unsupported");
 			return (u64)NULL;
@@ -117,7 +117,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 __weak
 int scx_static_destroy(void)
 { 
-	size_t alloc_pages = scx_static.max_alloc_bytes / PAGE_SIZE;
+	size_t alloc_pages = scx_static.max_contig_bytes / PAGE_SIZE;
 	scx_ll_t *ll, *llnext;
 
 	for(ll = scx_static.memory; ll && can_loop; ll = llnext) {
@@ -148,7 +148,7 @@ int scx_static_init(size_t alloc_pages)
 
 	/* We reserve sizeof(*ll) for the embedded linked list. */
 	scx_static = (struct scx_static) {
-		.max_alloc_bytes = max_bytes,
+		.max_contig_bytes = max_bytes,
 		.off = sizeof(*ll),
 		.memory = memory,
 	};

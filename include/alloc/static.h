@@ -13,7 +13,7 @@ int scx_static_destroy(void);
 #endif /* __BPF__ */
 
 struct scx_static {
-	size_t max_alloc_bytes;
+	size_t max_contig_bytes;
 	void __arena *memory;
 	size_t off;
 };
