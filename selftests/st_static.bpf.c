@@ -221,7 +221,13 @@ int scx_selftest_static_alloc_exhaustion(u64 bytes, u64 alignment)
 	void __arena *mem;
 	int i;
 
+	/* Allocate one page at a time here. */
 	INIT_OR_FAIL(PAGE_SIZE);
+
+	if (scx_static_memlimit(bytes)) {
+		bpf_printk("%s:%d scx_static_memlimit failed", __func__, __LINE__);
+		return -EINVAL;
+	}
 
 	/* Make an unfullfilable allocation. */
 	mem = scx_static_alloc(bytes + 1, 1);
@@ -231,10 +237,15 @@ int scx_selftest_static_alloc_exhaustion(u64 bytes, u64 alignment)
 		return -EINVAL;
 	}
 
+	/*
+	 * Amounts to allocations of size alignment, but also
+	 * checks that alignment padding is properly accounted for.
+	 */
 	for (i = 0; i < allocs && can_loop; i++)
-		ALLOC_OR_FAIL(padded, alignment);
+		ALLOC_OR_FAIL(1, alignment);
 
-	mem = scx_static_alloc(bytes, alignment);
+	/* Even a single byte allocation should fail. */
+	mem = scx_static_alloc(1, 1);
 	if (mem) {
 		bpf_printk("%s:%d scx_static_alloc succeeded", __func__, __LINE__);
 		scx_static_destroy();
@@ -262,7 +273,9 @@ int scx_selftest_static(void)
 	}
 	
 	SCX_STATIC_SELFTEST(alloc_aligned);
-	SCX_STATIC_SELFTEST(alloc_exhaustion, bytes, PAGE_SIZE / 2);
+
+	for (alignment = PAGE_SIZE; bytes <= ST_MAX_PAGES && can_loop; bytes <<= 1)
+		SCX_STATIC_SELFTEST(alloc_exhaustion, ST_MAX_PAGES << PAGE_SHIFT, alignment);
 
 	return 0;
 }

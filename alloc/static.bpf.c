@@ -18,6 +18,9 @@
 
 #include <alloc/static.h>
 
+/* Maximum memory that can be allocated by the arena. */
+#define ARENA_MAX_MEMORY (1ULL << 32)
+
 private(STATIC_ALLOC) struct bpf_spin_lock static_lock;
 
 struct scx_static scx_static;
@@ -60,6 +63,12 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	 * fragmentation.
 	 */
 	if (scx_static.off + alloc_bytes > scx_static.max_contig_bytes) {
+		if (scx_static.cur_memusage + scx_static.max_contig_bytes > scx_static.lim_memusage) {
+			bpf_spin_unlock(&static_lock);
+			bpf_printk("allocator memory limit exceeded");
+			return (u64)NULL;
+		}
+
 		old = scx_static.memory;
 
 		bpf_spin_unlock(&static_lock);
@@ -104,6 +113,8 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 		 */
 		padding = round_up(addr, alignment) - addr;
 		alloc_bytes = bytes + padding;
+
+		scx_static.cur_memusage += scx_static.max_contig_bytes;
 	}
 
 	ptr = (void __arena *)(addr + padding);
@@ -151,7 +162,32 @@ int scx_static_init(size_t alloc_pages)
 		.max_contig_bytes = max_bytes,
 		.off = sizeof(*ll),
 		.memory = memory,
+		.lim_memusage = ARENA_MAX_MEMORY,
+		.cur_memusage = max_bytes,
 	};
+	bpf_spin_unlock(&static_lock);
+
+	return 0;
+}
+
+__weak
+int scx_static_memlimit(u64 lim_memusage)
+{
+	bpf_spin_lock(&static_lock);
+
+	if (lim_memusage > ARENA_MAX_MEMORY)
+		return -EINVAL;
+
+	/* We always allocate at a page granularity. */
+	if (lim_memusage % PAGE_SIZE)
+		return -EINVAL;
+
+	/* Have we already overshot the limit? */
+	if (lim_memusage > scx_static.cur_memusage)
+		return -EINVAL;
+
+	scx_static.lim_memusage = lim_memusage;
+
 	bpf_spin_unlock(&static_lock);
 
 	return 0;
