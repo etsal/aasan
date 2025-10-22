@@ -361,8 +361,6 @@ topo_iter_level_internal(struct topo_iter *iter, enum topo_level lvl)
 	return (u64)iter->topo;
 }
 
-volatile u64 a;
-
 __weak __maybe_unused
 int topo_print(void)
 {
