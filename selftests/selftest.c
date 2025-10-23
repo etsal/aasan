@@ -275,6 +275,17 @@ selftest_fd(int prog_fd)
 }
 
 static int
+selftest_arena_alloc_reserve(struct selftest *skel)
+{
+	int prog_fd;
+
+	prog_fd = bpf_program__fd(skel->progs.arena_alloc_reserve);
+	assert(prog_fd >= 0 && "no program found");
+
+	return selftest_fd(prog_fd);
+}
+
+static int
 selftest(struct selftest *skel)
 {
 	int prog_fd;
@@ -328,6 +339,8 @@ int main(int argc, char *argv[])
 
 	ret = selftest__attach(skel);
 	VALIDATE(ret);
+
+	selftest_arena_alloc_reserve(skel);
 
 	selftest_arena_init(skel);
 	selftest_topology_init(skel);
