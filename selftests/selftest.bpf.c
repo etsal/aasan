@@ -30,12 +30,6 @@ int arena_selftest(void)
 //		return ret;
 //	}
 
-	ret = scx_selftest_static();
-	if (ret) {
-		bpf_printk("scx_selftest_static failed with %d", ret);
-		return ret;
-	}
-
 	ret = scx_selftest_lvqueue();
 	if (ret) {
 		bpf_printk("scx_selftest_lvqueue failed with %d", ret);
@@ -60,15 +54,15 @@ int arena_selftest(void)
 //		return ret;
 //	}
 //
-	ret = scx_selftest_static();
-	if (ret) {
-		bpf_printk("scx_selftest_static failed with %d", ret);
-		return ret;
-	}
-
 	ret = scx_selftest_topology();
 	if (ret) {
 		bpf_printk("scx_selftest_topology failed with %d", ret);
+		return ret;
+	}
+
+	ret = scx_selftest_static();
+	if (ret) {
+		bpf_printk("scx_selftest_static failed with %d", ret);
 		return ret;
 	}
 
