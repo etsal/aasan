@@ -242,19 +242,15 @@ selftest_topology_init(struct selftest *skel)
 }
 
 static int
-selftest(struct selftest *skel)
+selftest_fd(int prog_fd)
 {
 	struct bpf_test_run_opts opts;
 	struct arena_init_args args;
 	char buf[1024];
-	int prog_fd;
 	int progret;
 	int ret;
 
 	memset(&opts, 0, sizeof(opts));
-	prog_fd = bpf_program__fd(skel->progs.arena_selftest);
-	assert(prog_fd >= 0 && "no program found");
-
 	opts.sz = sizeof(opts);
 
 	ret = bpf_prog_test_run_opts(prog_fd, &opts);
@@ -276,6 +272,17 @@ selftest(struct selftest *skel)
 	VALIDATE(ret);
 
 	return 0;
+}
+
+static int
+selftest(struct selftest *skel)
+{
+	int prog_fd;
+
+	prog_fd = bpf_program__fd(skel->progs.arena_selftest);
+	assert(prog_fd >= 0 && "no program found");
+
+	return selftest_fd(prog_fd);
 }
 
 int bump_rlimit(void)
