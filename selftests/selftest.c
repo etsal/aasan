@@ -31,13 +31,6 @@
 
 #include "selftest.skel.h"
 
-struct bpf_prog_stream_read_opts {
-	size_t sz;
-	size_t :0;
-};
-
-extern int bpf_prog_stream_read(int prog_fd, __u32 stream_id, void *buf, __u32 buf_len, struct bpf_prog_stream_read_opts *opts) __attribute__((weak));
-
 char *topo_command = "lscpu --all --parse \
 		      | cut -f 1,2,4,9 -d ',' \
 		      | tail -n +5";
@@ -270,10 +263,6 @@ selftest(struct selftest *skel)
 	if (opts.retval)
 		fprintf(stderr, "error %d in %s\n", opts.retval, __func__);
 
-	if (!bpf_prog_stream_read) {
-		fprintf(stderr, "[BPF Streams Unavailable]\n");
-		return 0;
-	}
 	printf("BPF stdout:\n");
 	while ((ret = bpf_prog_stream_read(prog_fd, 1, buf, 1024, NULL)) > 0)
 		printf("%.*s", ret, buf);

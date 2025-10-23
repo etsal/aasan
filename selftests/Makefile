@@ -18,14 +18,18 @@ BPF_FLAGS=$(BPF_CFLAGS) $(BPF_ASAN_FLAGS) $(BPF_LLVM_FLAGS)
 BPF_CFLAGS+=-I../vmlinux -I/usr/include/bpf -I/usr/include/$(shell uname -m)-linux-gnu 
 BPF_CFLAGS+=$(INCLUDES)
 
-CFLAGS=-O2 -lbpf -lelf -lz -lzstd
+LIBBPF_DIR=../bpftool/src/libbpf
+LIBBPF_A=$(LIBBPF_DIR)/libbpf.a
+CFLAGS=-O2 -no-pie
 CFLAGS+=$(INCLUDES)
+CFLAGS+=-I$(LIBBPF_DIR)/include
+LDFLAGS=$(LIBBPF_A) -lelf -lz -lzstd
 
 test: selftest
 	sudo ./$<
 
 selftest: selftest.c selftest.skel.h
-	clang $(CFLAGS) $< -o $@
+	clang $(CFLAGS) $< $(LDFLAGS) -o $@
 
 selftest.skel.h: main.bpf.o
 	$(BPFTOOL) gen skeleton $< name "selftest" > $@
