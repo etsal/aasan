@@ -278,22 +278,32 @@ static int
 selftest_arena_alloc_reserve(struct selftest *skel)
 {
 	int prog_fd;
+	int ret;
 
+	printf("===START arena_alloc_reserve START===\n");
 	prog_fd = bpf_program__fd(skel->progs.arena_alloc_reserve);
 	assert(prog_fd >= 0 && "no program found");
 
-	return selftest_fd(prog_fd);
+	ret = selftest_fd(prog_fd);
+	fprintf(stderr, "====END arena_alloc_reserve END=====\n\n");
+
+	return ret;
 }
 
 static int
 selftest(struct selftest *skel)
 {
 	int prog_fd;
+	int ret;
 
+	printf("===START arena_selftest START===\n");
 	prog_fd = bpf_program__fd(skel->progs.arena_selftest);
 	assert(prog_fd >= 0 && "no program found");
 
-	return selftest_fd(prog_fd);
+	ret = selftest_fd(prog_fd);
+	printf("====END arena_selftest END=====\n\n");
+
+	return ret;
 }
 
 int bump_rlimit(void)
