@@ -11,7 +11,7 @@
 
 #include "selftest.h"
 
-struct scx_stk stack;
+private(ATQ_STACK) struct scx_stk stack;
 
 #define NATQS 16
 scx_atq_t *prios[NATQS];

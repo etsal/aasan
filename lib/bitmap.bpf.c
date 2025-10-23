@@ -5,7 +5,7 @@
 
 const volatile u32 nr_cpu_ids = NR_CPU_IDS_UNINIT;
 
-static struct scx_allocator scx_bitmap_allocator;
+private(BITMAP_ALLOC) static struct scx_allocator scx_bitmap_allocator;
 size_t mask_size;
 
 __weak

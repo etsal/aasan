@@ -21,9 +21,9 @@
 /* Maximum memory that can be allocated by the arena. */
 #define ARENA_MAX_MEMORY (1ULL << 32)
 
-private(STATIC_ALLOC) struct bpf_spin_lock static_lock;
+private(STATIC_ALLOC_LOCK) struct bpf_spin_lock static_lock;
 
-struct scx_static scx_static;
+private(STATIC_ALLOC) struct scx_static scx_static;
 
 struct scx_ll;
 struct scx_ll {

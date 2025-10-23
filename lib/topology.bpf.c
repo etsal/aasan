@@ -4,7 +4,7 @@
 #include <lib/cpumask.h>
 #include <lib/topology.h>
 
-volatile topo_ptr topo_all;
+private(TOPO_ALL) volatile topo_ptr topo_all;
 
 /*
  * XXXETSAL: This is a (hopefully) temporary measure that

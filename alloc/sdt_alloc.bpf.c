@@ -9,7 +9,7 @@
 #include <lib/arena_map.h>
 #include <lib/sdt_task.h>
 
-struct scx_alloc_stack __arena *prealloc_stack;
+private(PREALLOC_STACK) struct scx_alloc_stack __arena *prealloc_stack;
 
 /*
  * Necessary for cond_break/can_loop's semantics. According to kernel commit
@@ -44,12 +44,12 @@ __hidden void scx_arena_subprog_init(void)
 }
 
 
-private(LOCK) struct bpf_spin_lock alloc_lock;
+private(ALLOC_LOCK) struct bpf_spin_lock alloc_lock;
 private(POOL_LOCK) struct bpf_spin_lock alloc_pool_lock;
 
 /* allocation pools */
-struct sdt_pool desc_pool;
-struct sdt_pool chunk_pool;
+private(DESC_POOL) struct sdt_pool desc_pool;
+private(CHUNK_POOL) struct sdt_pool chunk_pool;
 
 /* Protected by alloc_lock. */
 struct scx_alloc_stats alloc_stats;

@@ -25,7 +25,7 @@ struct {
 	__type(value, struct scx_task_map_val);
 } scx_task_map SEC(".maps");
 
-struct scx_allocator scx_task_allocator;
+private(TASK_ALLOC) struct scx_allocator scx_task_allocator;
 
 __hidden
 void __arena *scx_task_alloc(struct task_struct *p)
