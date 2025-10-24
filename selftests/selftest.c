@@ -291,7 +291,7 @@ selftest_arena_alloc_reserve(struct selftest *skel)
 }
 
 static int
-selftest(struct selftest *skel)
+selftest_arena(struct selftest *skel)
 {
 	int prog_fd;
 	int ret;
@@ -355,7 +355,7 @@ int main(int argc, char *argv[])
 	selftest_arena_init(skel);
 	selftest_topology_init(skel);
 
-	selftest(skel);
+	selftest_arena(skel);
 
 	printf("Tests complete");
 
