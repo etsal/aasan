@@ -282,10 +282,6 @@ selftest_arena_alloc_reserve(struct selftest *skel)
 	int prog_fd;
 	int ret;
 
-	/* Necessary initialization for the test. */
-	selftest_arena_init(skel);
-	selftest_topology_init(skel);
-
 	printf("===START arena_alloc_reserve START===\n");
 	prog_fd = bpf_program__fd(skel->progs.arena_alloc_reserve);
 	assert(prog_fd >= 0 && "no program found");
@@ -301,6 +297,10 @@ selftest_arena(struct selftest *skel)
 {
 	int prog_fd;
 	int ret;
+
+	/* Necessary initialization for the test. */
+	selftest_arena_init(skel);
+	selftest_topology_init(skel);
 
 	printf("===START arena_selftest START===\n");
 	prog_fd = bpf_program__fd(skel->progs.arena_selftest);
@@ -383,8 +383,8 @@ int run_test(selftest_func func)
 
 int main(int argc, char *argv[])
 {
-	run_test(selftest_arena);
 	run_test(selftest_alloc);
+	run_test(selftest_arena);
 
 	return 0;
 }
