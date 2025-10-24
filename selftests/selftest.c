@@ -57,6 +57,8 @@ u64 topo_max_offset[TOPO_LEVELS];
 
 #define CRASHOUT() do { fprintf(stderr, "%s:%d [fail]\n", __func__, __LINE__); exit(0); } while (0)
 
+typedef int (*selftest_func)(struct selftest *);
+
 static int
 selftest_arena_init(struct selftest *skel)
 {
@@ -280,6 +282,10 @@ selftest_arena_alloc_reserve(struct selftest *skel)
 	int prog_fd;
 	int ret;
 
+	/* Necessary initialization for the test. */
+	selftest_arena_init(skel);
+	selftest_topology_init(skel);
+
 	printf("===START arena_alloc_reserve START===\n");
 	prog_fd = bpf_program__fd(skel->progs.arena_alloc_reserve);
 	assert(prog_fd >= 0 && "no program found");
@@ -302,6 +308,24 @@ selftest_arena(struct selftest *skel)
 
 	ret = selftest_fd(prog_fd);
 	printf("====END arena_selftest END=====\n\n");
+
+	return ret;
+}
+
+static int
+selftest_alloc(struct selftest *skel)
+{
+	int prog_fd;
+	int ret;
+
+	selftest_arena_alloc_reserve(skel);
+
+	printf("===START alloc_selftest START===\n");
+	prog_fd = bpf_program__fd(skel->progs.alloc_selftest);
+	assert(prog_fd >= 0 && "no program found");
+
+	ret = selftest_fd(prog_fd);
+	printf("====END alloc_selftest END=====\n\n");
 
 	return ret;
 }
@@ -329,7 +353,7 @@ static int libbpf_print_fn(enum libbpf_print_level level,
 	return vfprintf(stderr, format, args);
 }
 
-int main(int argc, char *argv[])
+int run_test(selftest_func func)
 {
 	struct selftest *skel;
 	int ret;
@@ -350,14 +374,17 @@ int main(int argc, char *argv[])
 	ret = selftest__attach(skel);
 	VALIDATE(ret);
 
-	selftest_arena_alloc_reserve(skel);
-
-	selftest_arena_init(skel);
-	selftest_topology_init(skel);
-
-	selftest_arena(skel);
+	func(skel);
 
 	printf("Tests complete");
+
+	return 0;
+}
+
+int main(int argc, char *argv[])
+{
+	run_test(selftest_arena);
+	run_test(selftest_alloc);
 
 	return 0;
 }
