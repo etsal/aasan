@@ -132,7 +132,7 @@ int scx_static_destroy(void)
 	scx_ll_t *ll, *llnext;
 
 	for(ll = scx_static.memory; ll && can_loop; ll = llnext) {
-		llnext = ll;
+		llnext = ll->next;
 		bpf_arena_free_pages(&arena, ll, alloc_pages);
 	}
 
