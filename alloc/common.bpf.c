@@ -12,20 +12,5 @@
 SEC("syscall")
 int arena_alloc_reserve(void)
 {
-	void __arena *start;
-
-	/*
-	 * Allocate and free a page to initialize the range tree.
-	 * This way we also find the first address in the arena.
-	 */
-
-	start = bpf_arena_alloc_pages(&arena, NULL, 1, NUMA_NO_NODE, 0);
-	if (!start)
-		return -ENOMEM;
-
-	bpf_arena_free_pages(&arena, start, 1);
-
-	/* Reserve the arena's starting region. */
-
-	return (bpf_arena_reserve_pages(&arena, start, RESERVE_ALLOC));
+	return bpf_arena_reserve_pages(&arena, NULL, RESERVE_ALLOC);
 }
