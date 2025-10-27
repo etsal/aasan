@@ -9,8 +9,14 @@ BPFTOOL=bpftool
 INCLUDES=-I../include -I../include/arch -I ../include/arch/bpf-compat
 
 BPF_CFLAGS=--target=bpf -g -O2 -Wall -Wno-compare-distinct-pointer-types -D__TARGET_ARCH_x86 -mcpu=v3 -mlittle-endian -c
-BPF_ASAN_FLAGS=-fsanitize=address -shared-libasan -fno-sanitize-link-runtime 
-BPF_LLVM_FLAGS=-mllvm -asan-instrument-address-spaces=1 -mllvm -asan-use-stack-safety=0 -mllvm -asan-stack=0 -mllvm -asan-kernel=1
+BPF_ASAN_FLAGS=-fsanitize=kernel-address -fno-stack-protector
+
+BPF_LLVM_FLAGS= -mllvm -asan-instrument-address-spaces=1
+BPF_LLVM_FLAGS+= -mllvm -asan-instrument-address-spaces=1 
+BPF_LLVM_FLAGS+= -mllvm -asan-use-stack-safety=0 -mllvm -asan-stack=0 
+BPF_LLVM_FLAGS+= -mllvm -asan-kernel=1 
+BPF_LLVM_FLAGS+= -mllvm -asan-constructor-kind=none
+BPF_LLVM_FLAGS+= -mllvm -asan-destructor-kind=none
 
 BPF_FLAGS=$(BPF_CFLAGS) $(BPF_ASAN_FLAGS) $(BPF_LLVM_FLAGS)
 
