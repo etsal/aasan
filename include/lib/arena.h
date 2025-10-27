@@ -1,5 +1,9 @@
 #pragma once
 
+#ifdef __BPF__
+#include <alloc/asan.h>
+#endif /* __BPF__ */
+
 #define NR_CPU_IDS_UNINIT (~(u32)0)
 
 struct arena_init_args {
