@@ -81,19 +81,20 @@ Basic functionality
     - track static alloc allocated blocks to free on destroy()
     - free all stack segments in stack allocator on destroy()
     - destroy buddy allocator chunks on destroy()
-==================> WE ARE HERE
 - [T] Initial testing for allocator
     - static: Alloc/fill, alloc/fill, check, alloc/fill, check, etc.
+==================> WE ARE HERE
 - [M] Stubs for all compiler-generated methods, will be filled in
 during development
-- [M] ASAN intrinsics - [generic.c]
 - [M] kasan_poison
 - [M] kasan_poison_last_granule
 - [M] kasan_unpoison
-- [M] __kasan_poison_pages
-- [A] __kasan_poison_pages on bpf_page_alloc
-- [A] __kasan_unpoison_range on allocation
+- [M] (__)kasan_poison_pages
+- [M] ASAN intrinsics - [generic.c]
 - [A] kasan_poison_last_granule on freeing
+- [A] Add intrinsics to static allocator
+    - Poisoning on chunk allocation
+    - Unpoisoning on user allocation
 - [A] Minimal allocator that can explicitly allocate
 and free certain addresses
 - [T] Basic passing tests
@@ -105,6 +106,9 @@ and free certain addresses
 	  	- Test with sizes 1 to 128
 	- Allocate with a set memory gap between allocations
 		- Has to be a multiple of GRANULE
+
+- [M] Reason about offsets within the arena. Ensure ASAN works
+even with user-specified arena offsets.
 
 Alloc/Free Tracking
 -------------------
