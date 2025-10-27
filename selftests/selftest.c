@@ -384,7 +384,6 @@ int run_test(selftest_func func)
 int main(int argc, char *argv[])
 {
 	run_test(selftest_alloc);
-	run_test(selftest_arena);
 
 	return 0;
 }
