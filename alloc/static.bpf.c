@@ -37,6 +37,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	void __arena *memory, *old;
 	scx_ll_t *oldll, *newll;
 	size_t alloc_bytes;
+	size_t alloc_pages;
 	void __arena *ptr;
 	size_t padding;
 	u64 addr;
@@ -78,17 +79,21 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 		 * allocation memory.
 		 */
 
-		memory = bpf_arena_alloc_pages(&arena, NULL,
-					       scx_static.max_contig_bytes / PAGE_SIZE,
-					       NUMA_NO_NODE, 0);
+		alloc_pages = scx_static.max_contig_bytes / PAGE_SIZE;
+
+		memory = bpf_arena_alloc_pages(&arena, NULL, alloc_pages, NUMA_NO_NODE, 0);
 		if (!memory)
 			return (u64)NULL;
+
+		asan_poison(memory, scx_static.max_contig_bytes);
 
 		bpf_spin_lock(&static_lock);
 
 		/* Error out if we raced with another allocation. */
 		if (scx_static.memory != old) {
 			bpf_spin_unlock(&static_lock);
+			asan_unpoison(memory, alloc_pages);
+
 			bpf_arena_free_pages(&arena, memory, scx_static.max_contig_bytes);
 
 			bpf_printk("concurrent static memory allocations unsupported");
@@ -118,6 +123,8 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	}
 
 	ptr = (void __arena *)(addr + padding);
+	asan_unpoison(memory, bytes);
+
 	scx_static.off += alloc_bytes;
 
 	bpf_spin_unlock(&static_lock);
@@ -133,6 +140,7 @@ int scx_static_destroy(void)
 
 	for(ll = scx_static.memory; ll && can_loop; ll = llnext) {
 		llnext = ll->next;
+		asan_unpoison(ll, alloc_pages);
 		bpf_arena_free_pages(&arena, ll, alloc_pages);
 	}
 
@@ -151,6 +159,7 @@ int scx_static_init(size_t alloc_pages)
 	memory = bpf_arena_alloc_pages(&arena, NULL, alloc_pages, NUMA_NO_NODE, 0);
 	if (!memory)
 		return -ENOMEM;
+	asan_poison(memory, max_bytes);
 
 	ll = (scx_ll_t *)memory;
 	ll->next = NULL;
