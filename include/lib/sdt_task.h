@@ -9,6 +9,8 @@
 #ifdef __BPF__
 #include <scx/bpf_arena_common.bpf.h>
 #include <scx/bpf_arena_spin_lock.h>
+
+#include <alloc/asan.h>
 #else  /* __BPF__ */
 #include <scx/bpf_arena_common.h>
 #endif /* __BPF__ */
