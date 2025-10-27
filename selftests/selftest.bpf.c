@@ -34,6 +34,8 @@ int alloc_selftest(void)
 	}
 #endif
 
+	bpf_printk("Alloc selftests successful.");
+
 	return 0;
 }
 

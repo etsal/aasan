@@ -376,7 +376,7 @@ int run_test(selftest_func func)
 
 	func(skel);
 
-	printf("Tests complete");
+	printf("Tests complete\n");
 
 	return 0;
 }
