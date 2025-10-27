@@ -94,7 +94,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 			bpf_spin_unlock(&static_lock);
 			asan_unpoison(memory, alloc_pages);
 
-			bpf_arena_free_pages(&arena, memory, scx_static.max_contig_bytes);
+			bpf_arena_free_pages(&arena, memory, alloc_pages);
 
 			bpf_printk("concurrent static memory allocations unsupported");
 			return (u64)NULL;
