@@ -9,6 +9,8 @@
 #include <lib/arena_map.h>
 #include <lib/sdt_task.h>
 
+#include <alloc/asan.h>
+
 static
 u64 scx_next_pow2(__u64 n)
 {
