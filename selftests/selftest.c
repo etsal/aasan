@@ -327,6 +327,14 @@ selftest_alloc(struct selftest *skel)
 	ret = selftest_fd(prog_fd);
 	printf("====END alloc_selftest END=====\n\n");
 
+	if (ret)
+		return ret;
+
+	printf("====OVERTIME=====\n\n");
+	prog_fd = bpf_program__fd(skel->progs.static_asan_test);
+	assert(prog_fd >= 0 && "no program found");
+	ret = selftest_fd(prog_fd);
+
 	return ret;
 }
 

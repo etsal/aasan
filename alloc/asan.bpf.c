@@ -1,53 +1,59 @@
 #include <scx/common.bpf.h>
 #include <scx/bpf_arena_common.bpf.h>
 
-#define KASAN_SHADOW_SCALE_SHIFT 8
-#define KASAN_GRANULE_MASK ((1ULL << KASAN_SHADOW_SCALE_SHIFT) - 1)
-#define KASAN_GRANULE_MASK ((1ULL << KASAN_SHADOW_SCALE_SHIFT) - 1)
-
-#define GRANULE(expr) (((u64)expr) & KASAN_GRANULE_MASK)
-
-
-/* Last 1/8th of the address space. */
-/* XXX THIS IS WRONG, WE SHOULD ALWAY USE DYNAMIC OFFSETS */
-#define KASAN_SHADOW_OFFSET (0xe0000000)
+#include <lib/arena_map.h>
+#include <alloc/asan.h>
 
 /*
  * Implementation based on mm/kasan/generic.c.
  */
 
+
+/* XXX Remove the hardcoded values and change them with:
+ * - Offset is 7/8ths of the arena.
+ * - Size is 1/8th of the arena
+ * - Limit is variable and found in the arena map.
+ */
+
+/* Last 1/8th of the address space. */
+#define KASAN_SHADOW_OFFSET (0xe0000000)
+#define KASAN_SHADOW_SIZE (0x10000000)
+#define ARENA_LIMIT (1ULL << 32)
+
 /*
- * For now just keep executing.
+ * XXX Shadow map occupancy map (see comment in arena_init.c and the 
+ * item in the README).
  */
 
 static bool reported = false;
+static bool inited = false;
+void *__asan_shadow_memory_dynamic_address;
 
 /*
  * XXX Static key for turning ASAN off.
  */
 
-/*
- * Code mirrors the default ASAN implementation.
- */
-
-/*
- * XXX What's the KASAN_SHADOW_SCALE_SHIFT? We should do 8 for now.
- */
-/*
- * XXX What's the KASAN_SHADOW_SCALE_OFFSET? It must be variable because
- * the arena must be variable.
- */
-
-#define ARENA_LIMIT (1ULL << 32)
 
 /* Defined as char * to get 1-byte granularity for pointer arithmetic. */
-typedef const char __arena * arenaptr;
+typedef u8 __arena * arenaptr;
 typedef s8 __arena s8a;
 
 static __always_inline
 arenaptr mem_to_shadow(arenaptr addr)
 {
-	return (arenaptr)((u64) addr >> KASAN_SHADOW_SCALE_SHIFT) + KASAN_SHADOW_OFFSET;
+	return (arenaptr)((u64) addr >> KASAN_SHADOW_SCALE) + KASAN_SHADOW_OFFSET;
+}
+
+/*
+ * BPF does not currently support the memset/memcpy/memcmp intrinsics.
+ */
+static __always_inline
+void asan_memset(u8 __arg_arena __arena *dst, u8 val, size_t size)
+{
+	int i;
+
+	for (i = 0; i < size && can_loop; i++)
+		dst[i] = val;
 }
 
 /* Validate a 1-byte access, always within a single byte. */
@@ -61,7 +67,7 @@ static __always_inline bool memory_is_poisoned_1(arenaptr addr)
 
 	/* Byte is non-zero, access is valid if granule offset in [0, shadow_value). */
 
-	return GRANULE(addr) >= shadow_value;
+	return KASAN_GRANULE(addr) >= shadow_value;
 }
 
 /* Validate a 2- 4-, 8-byte access, spans up to 2 bytes. */
@@ -73,7 +79,7 @@ static __always_inline bool memory_is_poisoned_2_4_8(arenaptr addr, u64 size)
 	 * Region fully within a single byte (addition didn't
 	 * overflow above KASAN_GRANULE).
 	 */
-	if (likely(GRANULE(last_addr) >= size - 1))
+	if (likely(KASAN_GRANULE(last_addr) >= size - 1))
 		return memory_is_poisoned_1((arenaptr)last_addr);
 
 	/*
@@ -158,7 +164,7 @@ static __always_inline bool memory_is_poisoned_n(arenaptr addr, u64 size)
 	if (likely(ret == ARENA_LIMIT))
 		return false;
 
-	return __builtin_expect((arenaptr)ret != end || GRANULE(end) >= *end, false);
+	return __builtin_expect((arenaptr)ret != end || KASAN_GRANULE(end) >= *end, false);
 }
 
 static __always_inline void asan_report(arenaptr addr, size_t sz, bool write)
@@ -228,7 +234,23 @@ static __always_inline bool check_region_inline(void *ptr, size_t size, bool wri
 	void __always_inline __asan_load##size##_noabort(void *addr)		\
 	{									\
 		__asan_load##size(addr);					\
-	}
+	}									\
+	void __asan_report_store##size(void *addr)		\
+	{									\
+		asan_report((arenaptr)addr, size, true);			\
+	}									\
+	void __asan_report_store##size##_noabort(void *addr)	\
+	{									\
+		asan_report((arenaptr)addr, size, true);			\
+	}									\
+	void __asan_report_load##size(void *addr)		\
+	{									\
+		asan_report((arenaptr)addr, size, false);			\
+	}									\
+	void __asan_report_load##size##_noabort(void *addr)	\
+	{									\
+		asan_report((arenaptr)addr, size, false);			\
+	}									\
 
 DEFINE_ASAN_LOAD_STORE(1);
 DEFINE_ASAN_LOAD_STORE(2);
@@ -330,4 +352,157 @@ void *__asan_stack_malloc_always_n(size_t scale, size_t size)
 // Functions concerning fake stack free
 void __asan_stack_free_n(int scale, void *p, size_t n)
 {
+}
+
+/*
+ * Poisoning code, used when we add more freed memory to the allocator by:
+ * 	a) pulling memory from the arena segment using bpf_arena_alloc_pages()
+ * 	b) freeing memory from application code
+ */
+__hidden
+int asan_poison(void __arena __arg_arena *addr, size_t size)
+{
+	arenaptr shadow;
+	size_t len;
+
+	/*
+	 * Poisoning from a non-granule address makes no sense: We can only allocate
+	 * memory to the application that with a granule-aligned starting address,
+	 * and bpf_arena_alloc_pages returns page-aligned memory. A non-aligned
+	 * addr then implies we're freeing a different address than the one we
+	 * allocated.
+	 */
+	if (unlikely((u64)addr & KASAN_GRANULE_MASK)) {
+		//bpf_printk("Poison region address not aligned to granule");
+		return 0;
+	}
+
+	/*
+	 * We cannot free an unaligned region because it's possible that we
+	 * cannot describe the resulting poisoning state of the granule in 
+	 * the ASAN encoding.
+	 *
+	 * Every granule represents a region of memory that looks like the
+	 * following (P for poisoned bytes, C for clear):
+	 *
+	 * <Clear>  <Poisoned>
+	 * [ C C C ... P P ]
+	 *
+	 * The value of the granule's shadow map is the number of clear bytes in
+	 * it. We cannot represent granules with the following state:
+	 *
+	 * [ P P ... C C ... P P ]
+	 *
+	 * That would be possible if we could free unaligned regions, so prevent that.
+	 * 
+	 */
+	if (unlikely(size & KASAN_GRANULE_MASK)) {
+		//bpf_printk("Poison region size not aligned to granule");
+		return 0;
+	}
+
+	shadow = mem_to_shadow(addr);
+	len = size / KASAN_SHADOW_SCALE;
+
+	asan_memset(shadow, KASAN_SHADOW_SCALE, len);
+
+	return 0;
+}
+
+/*
+ * Unpoisoning code for marking memory as valid during allocation calls.
+ *
+ * Very similar to asan_poison, except we need to round up instead of
+ * down, the partially poison the last granule if necessary.
+ *
+ * Partial poisoning is useful for keeping the padding poisoned. Allocations
+ * are granule-aligned, so we we're reserving granule-aligned sizes for the
+ * allocation. However, we want to still treat accesses to the padding as 
+ * invalid. Partial poisoning takes care of that. Freeing and poisoning the
+ * memory is still done in granule-aligned sizes and repoisons the already
+ * poisoned padding.
+ */
+__hidden
+int asan_unpoison(void __arena __arg_arena *addr, size_t size)
+{
+	size_t partial = size % KASAN_SHADOW_SCALE;
+	arenaptr shadow;
+	size_t len;
+
+	/*
+	 * We cannot allocate in the middle of the granule. The ASAN shadow
+	 * map encoding only describes regions of memory where every granule
+	 * follows this format (P for poisoned, C for clear):
+	 *
+	 * <Clear>  <Poisoned>
+	 * [ C C C ... P P ]
+	 *
+	 * This is so we can use a single number in [0, KASAN_SHADOW_SCALE)
+	 * to represent the poison state of the granule.
+	 */
+	if (unlikely((u64)addr & KASAN_GRANULE_MASK)) {
+//		bpf_printk("Poison region address not aligned to granule");
+		return 0;
+	}
+
+	shadow = mem_to_shadow(addr);
+	len = size / KASAN_SHADOW_SCALE;
+
+	asan_memset(shadow, 0, len);
+
+	/* 
+	 * If we are allocating a non-granule aligned region, we need to adjust
+	 * the last byte of the shadow map to list how many bytes in the granule
+	 * are unpoisoned. If the region is aligned, then the memset call above
+	 * was enough.
+	 */
+	if (partial)
+		shadow[len] = partial;
+
+	return 0;
+}
+
+/*
+ * Initialize ASAN state when necessary. Triggered during allocator startup.
+ */
+__hidden
+int asan_init(void)
+{
+	void __arena *shadowmap;
+
+	if (inited)
+		return 0;
+
+	/*
+	 * XXX Fail for arenas that are < 32KiB, or are not 32KiB aligned. 
+	 * Handling them would require extra edge case handling that would
+	 * complicate things, and there is no good reason to support them.
+	 */
+
+	/* 
+	 * Allocate the last (1/KASAN_GRANULE_SIZE)th of an arena's pages for the map
+	 * We find the offset and size from the arena map.
+	 *
+	 * The allocated map pages are zeroed out, meaning all memory is marked as valid
+	 * even if it's not allocated already. This is expected: Since the actual memory
+	 * pages are not allocated, accesses to it will trigger page faults and will be
+	 * reported through BPF streams. Any pages allocated through bpf_arena_alloc_pages
+	 * should be poisoned by the allocator right after the call succeeds.
+	 *
+	 * XXX Do this lazily as denoted in the README item. Scale this with the arena
+	 * size - right now we assume both in the offset and the size are for a 4GiB
+	 * arena. Even for a 4GiB arena, the space overhead for lazy shadow map 
+	 * allocation is 4KiB.
+	 *
+	 * XXX The shadowmap offset is hardcoded in mem_to_shadow, so we just allocate 
+	 * the pages and drop the returned address.
+	 */
+	shadowmap = bpf_arena_alloc_pages(&arena, (void __arena *)KASAN_SHADOW_OFFSET, KASAN_SHADOW_SIZE, NUMA_NO_NODE, 0);
+	if (!shadowmap)
+		return -ENOMEM;
+
+	__asan_shadow_memory_dynamic_address = (void *)KASAN_SHADOW_OFFSET;
+
+	inited = true;
+	return 0;
 }

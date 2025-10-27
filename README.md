@@ -83,20 +83,14 @@ Basic functionality
     - destroy buddy allocator chunks on destroy()
 - [T] Initial testing for allocator
     - static: Alloc/fill, alloc/fill, check, alloc/fill, check, etc.
-==================> WE ARE HERE
-- [M] Stubs for all compiler-generated methods, will be filled in
-during development
 - [M] kasan_poison
-- [M] kasan_poison_last_granule
 - [M] kasan_unpoison
-- [M] (__)kasan_poison_pages
 - [M] ASAN intrinsics - [generic.c]
-- [A] kasan_poison_last_granule on freeing
 - [A] Add intrinsics to static allocator
     - Poisoning on chunk allocation
     - Unpoisoning on user allocation
-- [A] Minimal allocator that can explicitly allocate
-and free certain addresses
+==================> WE ARE HERE
+- [M] (__)kasan_poison_pages
 - [T] Basic passing tests
 	- Get memory into the allocator and ensure it's poisoned
 	- Allocate memory to the user and ensure it's valid
@@ -107,8 +101,19 @@ and free certain addresses
 	- Allocate with a set memory gap between allocations
 		- Has to be a multiple of GRANULE
 
+Removing Temporary Workarounds
+------------------------------
+
 - [M] Reason about offsets within the arena. Ensure ASAN works
 even with user-specified arena offsets.
+- [M] Dynamically allocate shadow map memory. Possibly use a 
+per-page statically allocated map to see whether we have allocated
+a page for that part of the map.
+    - One page of a residence map tracks 8 * 4K = 32K pages. We only need
+    to track the pages of the shadow map, which is 1/8th of the 
+    address space = 512MiB worth of pages = 128K pages. So a residence
+    map with 4 pages is enough to tell us whether we need to allocate
+    memory for the shadow map.
 
 Alloc/Free Tracking
 -------------------

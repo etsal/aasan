@@ -15,7 +15,9 @@
 
 #include <scx/common.bpf.h>
 #include <lib/arena_map.h>
+#include <lib/sdt_task.h>
 
+#include <alloc/asan.h>
 #include <alloc/static.h>
 
 /* Maximum memory that can be allocated by the arena. */
@@ -41,6 +43,13 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	void __arena *ptr;
 	size_t padding;
 	u64 addr;
+
+	/* 
+	 * Allocated addresses must be aligned to the nearest granule,
+	 * and since we're stack allocating this implies that allocations
+	 * sizes are also aligned.
+	 */
+	alignment = round_up(alignment, KASAN_SHADOW_SCALE);
 
 	bpf_spin_lock(&static_lock);
 
@@ -93,7 +102,6 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 		if (scx_static.memory != old) {
 			bpf_spin_unlock(&static_lock);
 			asan_unpoison(memory, alloc_pages);
-
 			bpf_arena_free_pages(&arena, memory, alloc_pages);
 
 			bpf_printk("concurrent static memory allocations unsupported");
@@ -123,7 +131,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	}
 
 	ptr = (void __arena *)(addr + padding);
-	asan_unpoison(memory, bytes);
+	asan_unpoison(ptr, bytes);
 
 	scx_static.off += alloc_bytes;
 
@@ -155,6 +163,13 @@ int scx_static_init(size_t alloc_pages)
 	size_t max_bytes = alloc_pages * PAGE_SIZE;
 	void __arena *memory;
 	scx_ll_t *ll;
+	int ret;
+
+	ret = asan_init();
+	if (ret) {
+		bpf_printk("Failed to initialize asan_state");
+		return ret;
+	}
 
 	memory = bpf_arena_alloc_pages(&arena, NULL, alloc_pages, NUMA_NO_NODE, 0);
 	if (!memory)

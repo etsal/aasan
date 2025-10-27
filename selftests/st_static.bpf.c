@@ -279,3 +279,43 @@ int scx_selftest_static(void)
 
 	return 0;
 }
+
+#define TEST_MESSAGE(msg, ...) do { bpf_printk("[%s] (%d) " msg, __func__, __LINE__, ##__VA_ARGS__); } while (0)
+
+/*
+ * Not a test that should be passing - used to trigger ASAN failures.
+ */
+SEC("syscall")
+int static_asan_test(void)
+{
+	const size_t alignment = 8;
+	const size_t size = 24; 
+	u8 __arena *mem;
+	int ret;
+	int i;
+
+	ret = scx_static_init(ST_MAX_PAGES);
+	if (ret) {
+		bpf_printk("scx_static_init failed with %d", ret);
+		return ret;
+	}
+
+	TEST_MESSAGE("writing %d bytes", size);
+
+	mem = ALLOC_OR_FAIL(size, alignment);
+
+	TEST_MESSAGE("accessing all valid bytes");
+
+	for (i = 0; i < size && can_loop; i++) {
+		mem[i] = 0xab;
+	}
+
+	TEST_MESSAGE("off-by-one OOB");
+
+	mem[size] = 0xee;
+
+	scx_static_destroy();
+
+	return 0;
+}
+
