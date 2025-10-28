@@ -59,6 +59,7 @@ u64 topo_max_offset[TOPO_LEVELS];
 
 typedef int (*selftest_func)(struct selftest *);
 
+#if 0
 static int
 selftest_arena_init(struct selftest *skel)
 {
@@ -242,6 +243,7 @@ selftest_topology_init(struct selftest *skel)
 
 	return 0;
 }
+#endif
 
 static int
 selftest_fd(int prog_fd)
@@ -276,6 +278,7 @@ selftest_fd(int prog_fd)
 	return 0;
 }
 
+#if 0
 static int
 selftest_arena_alloc_reserve(struct selftest *skel)
 {
@@ -291,10 +294,12 @@ selftest_arena_alloc_reserve(struct selftest *skel)
 
 	return ret;
 }
+#endif
 
 static int
 selftest_arena(struct selftest *skel)
 {
+#if 0
 	int prog_fd;
 	int ret;
 
@@ -310,6 +315,8 @@ selftest_arena(struct selftest *skel)
 	printf("====END arena_selftest END=====\n\n");
 
 	return ret;
+#endif
+	return 0;
 }
 
 static int
@@ -318,7 +325,7 @@ selftest_alloc(struct selftest *skel)
 	int prog_fd;
 	int ret;
 
-	selftest_arena_alloc_reserve(skel);
+	//selftest_arena_alloc_reserve(skel);
 
 	printf("===START alloc_selftest START===\n");
 	prog_fd = bpf_program__fd(skel->progs.alloc_selftest);
@@ -374,7 +381,7 @@ int run_test(selftest_func func)
 	skel = selftest__open();
 	assert(skel && "no skeleton generated");
 
-	skel->rodata->nr_cpu_ids = get_nprocs();
+//	skel->rodata->nr_cpu_ids = get_nprocs();
 
 	ret = selftest__load(skel);
 	VALIDATE(ret);

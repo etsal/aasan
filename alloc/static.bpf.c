@@ -23,6 +23,8 @@
 /* Maximum memory that can be allocated by the arena. */
 #define ARENA_MAX_MEMORY (1ULL << 32)
 
+#include "asan.bpf.c"
+
 private(STATIC_ALLOC_LOCK) struct bpf_spin_lock static_lock;
 
 private(STATIC_ALLOC) struct scx_static scx_static;
@@ -140,6 +142,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	return (u64)ptr;
 }
 
+
 __weak
 int scx_static_destroy(void)
 { 
@@ -152,7 +155,11 @@ int scx_static_destroy(void)
 		bpf_arena_free_pages(&arena, ll, alloc_pages);
 	}
 
-	__builtin_memset(&scx_static, 0, sizeof(scx_static));
+	//static_memset(&scx_static, 0, sizeof(scx_static));
+
+	for (int i = 0; i < sizeof(scx_static) && can_loop; i++) {
+		((u8 *)&scx_static)[i] = 0;
+	}
 
 	return 0;
 }

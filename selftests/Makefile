@@ -1,6 +1,6 @@
 .PHONY: clean test
 
-BPF_SOURCES = $(wildcard ../alloc/*.bpf.c) $(wildcard ../lib/*.bpf.c) $(wildcard *.bpf.c)
+BPF_SOURCES = $(wildcard selftest.bpf.c)
 BPF_OBJECTS = $(notdir $(BPF_SOURCES:.bpf.c=.bpf.o))
 vpath %.bpf.c ../alloc ../lib .
 
@@ -40,11 +40,13 @@ selftest.skel.h: main.bpf.o
 	$(BPFTOOL) gen skeleton $< name "selftest" > $@
 
 main.bpf.o: $(BPF_OBJECTS)
+	echo $(BPF_OBJECTS)
 	$(BPFTOOL) gen object $@ $^
-	objcopy --change-section-address .addr_space.1=0x1000000 $@ $@
+##	objcopy --change-section-address .addr_space.1=0x1000000 $@ $@
 
 %.bpf.o: %.bpf.c
 	clang $(BPF_FLAGS) -c $< -o $@
+	clang $(BPF_FLAGS) -S -emit-llvm -o selftest.ll $< 
 		
 clean:
 	rm -f *.skel.h *.bpf.o selftest

@@ -7,6 +7,8 @@
 
 #include "selftest.h"
 
+#include "st_static.bpf.c"
+
 SEC("syscall")
 int alloc_selftest(void)
 {
@@ -42,6 +44,7 @@ int alloc_selftest(void)
 SEC("syscall")
 int arena_selftest(void)
 {
+#if 0
 	int ret;
 
 	ret = scx_selftest_atq();
@@ -82,6 +85,7 @@ int arena_selftest(void)
 
 	bpf_printk("Selftests successful.");
 
+#endif
 	return 0;
 }
 

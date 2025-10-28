@@ -27,7 +27,7 @@
 
 static bool reported = false;
 static bool inited = false;
-void *__asan_shadow_memory_dynamic_address;
+long __asan_shadow_memory_dynamic_address;
 
 /*
  * XXX Static key for turning ASAN off.
@@ -41,7 +41,7 @@ typedef s8 __arena s8a;
 static __always_inline
 arenaptr mem_to_shadow(arenaptr addr)
 {
-	return (arenaptr)((u64) addr >> KASAN_SHADOW_SCALE) + KASAN_SHADOW_OFFSET;
+	return (arenaptr)((u64) addr >> KASAN_SHADOW_SCALE) + (u64)__asan_shadow_memory_dynamic_address;
 }
 
 /*
@@ -501,7 +501,7 @@ int asan_init(void)
 	if (!shadowmap)
 		return -ENOMEM;
 
-	__asan_shadow_memory_dynamic_address = (void *)KASAN_SHADOW_OFFSET;
+	__asan_shadow_memory_dynamic_address = KASAN_SHADOW_OFFSET;
 
 	inited = true;
 	return 0;
