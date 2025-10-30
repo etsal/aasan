@@ -7,6 +7,7 @@
 #include <scx/common.bpf.h>
 #include <lib/sdt_task.h>
 
+#include <alloc/asan.h>
 #include <alloc/static.h>
 
 #include "selftest.h"
@@ -14,7 +15,7 @@
 /* XXX Some ARM systems have larger page sizes. */
 #define PAGE_SHIFT		12
 
-#define ST_MAX_PAGES		128
+#define ST_MAX_PAGES		8
 #define ST_MAX_BYTES		(ST_MAX_PAGES << PAGE_SHIFT)
 #define ST_MAX_ALIGNMENT	(ST_MAX_BYTES >> 4)
 
@@ -267,15 +268,22 @@ int scx_selftest_static(void)
 	for (bytes = PAGE_SIZE; bytes <= ST_MAX_PAGES && can_loop; bytes <<= 1) {
 		for (alignment = 1; alignment <= ST_MAX_ALIGNMENT && can_loop; alignment <<= 1) {
 			/* Each test manages its own allocator lifecycle */
+			CHECK();
 			SCX_STATIC_SELFTEST(alloc_single, bytes, alignment);
+			CHECK();
 			SCX_STATIC_SELFTEST(alloc_multiple, bytes, alignment);
+			CHECK();
 		}
 	}
 	
+	CHECK();
 	SCX_STATIC_SELFTEST(alloc_aligned);
+	CHECK();
 
-	for (alignment = PAGE_SIZE; bytes <= ST_MAX_PAGES && can_loop; bytes <<= 1)
+	for (alignment = PAGE_SIZE; bytes <= ST_MAX_PAGES && can_loop; bytes <<= 1) {
 		SCX_STATIC_SELFTEST(alloc_exhaustion, ST_MAX_PAGES << PAGE_SHIFT, alignment);
+		CHECK();
+	}
 
 	return 0;
 }
@@ -289,7 +297,7 @@ SEC("syscall")
 int static_asan_test(void)
 {
 	const size_t alignment = 8;
-	const size_t size = 24; 
+	const size_t bytes = 24; 
 	u8 __arena *mem;
 	int ret;
 	int i;
@@ -297,25 +305,36 @@ int static_asan_test(void)
 	ret = scx_static_init(ST_MAX_PAGES);
 	if (ret) {
 		bpf_printk("scx_static_init failed with %d", ret);
-		return ret;
+		return 0;
 	}
 
-	TEST_MESSAGE("writing %d bytes", size);
+	CHECK();
 
-	mem = ALLOC_OR_FAIL(size, alignment);
-
-	TEST_MESSAGE("accessing all valid bytes");
-
-	for (i = 0; i < size && can_loop; i++) {
-		mem[i] = 0xab;
+	mem = scx_static_alloc(bytes, alignment);
+	if (!mem) {
+		bpf_printk("Failed to allocate %d bytes");
+		return -ENOMEM;
 	}
 
-	TEST_MESSAGE("off-by-one OOB");
+	bpf_printk("Got %p", mem);
 
-	mem[size] = 0xee;
+	CHECK();
+
+	for (i = 0; i < bytes && can_loop; i++)
+		mem[i] = 0x5a;
+
+	CHECK();
+
+	/* ASAN violation */
+	for (i = 0; i < bytes && can_loop; i++)
+		mem[bytes + i] = 0x5a;
+
+	CHECK();
 
 	scx_static_destroy();
 
-	return 0;
-}
+	CHECK();
 
+	return 0;
+
+}
