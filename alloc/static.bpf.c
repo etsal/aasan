@@ -20,12 +20,15 @@
 #include <alloc/asan.h>
 #include <alloc/static.h>
 
+#define VAL(addr) do { bpf_printk("%s:%d Got %lx -> (val: %d gran: %x set: [%s])", __func__, __LINE__, addr, asan_shadow_value((addr)), ASAN_GRANULE(addr), asan_shadow_set((addr)) ? "yes" : "no"); } while (0)
 /* Maximum memory that can be allocated by the arena. */
-#define ARENA_MAX_MEMORY (1ULL << 32)
+#define ARENA_MAX_MEMORY (1ULL << 20)
 
 private(STATIC_ALLOC_LOCK) struct bpf_spin_lock static_lock;
 
 private(STATIC_ALLOC) struct scx_static scx_static;
+
+extern volatile u64 asan_violated;
 
 struct scx_ll;
 struct scx_ll {
@@ -49,7 +52,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	 * and since we're stack allocating this implies that allocations
 	 * sizes are also aligned.
 	 */
-	alignment = round_up(alignment, KASAN_SHADOW_SCALE);
+	alignment = round_up(alignment, 1 << ASAN_SHADOW_SHIFT);
 
 	bpf_spin_lock(&static_lock);
 
@@ -101,7 +104,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 		/* Error out if we raced with another allocation. */
 		if (scx_static.memory != old) {
 			bpf_spin_unlock(&static_lock);
-			asan_unpoison(memory, alloc_pages);
+			asan_unpoison(memory, scx_static.max_contig_bytes);
 			bpf_arena_free_pages(&arena, memory, alloc_pages);
 
 			bpf_printk("concurrent static memory allocations unsupported");
@@ -111,6 +114,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 		/* Keep a list of allocated blocks to free on allocator destruction. */
 		oldll = (scx_ll_t *)old;
 		newll = (scx_ll_t *)memory;
+		asan_unpoison(newll, sizeof(*newll));
 		newll->next = oldll;
 
 		/*
@@ -140,19 +144,27 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 	return (u64)ptr;
 }
 
+
 __weak
 int scx_static_destroy(void)
 { 
 	size_t alloc_pages = scx_static.max_contig_bytes / PAGE_SIZE;
 	scx_ll_t *ll, *llnext;
 
+	CHECK();
 	for(ll = scx_static.memory; ll && can_loop; ll = llnext) {
 		llnext = ll->next;
-		asan_unpoison(ll, alloc_pages);
+		CHECK();
+		VAL(ll);
+		asan_unpoison(ll, scx_static.max_contig_bytes);
 		bpf_arena_free_pages(&arena, ll, alloc_pages);
 	}
 
-	__builtin_memset(&scx_static, 0, sizeof(scx_static));
+	for (int i = 0; i < sizeof(scx_static) && can_loop; i++) {
+		((u8 *)&scx_static)[i] = 0;
+	}
+
+	CHECK();
 
 	return 0;
 }
@@ -165,16 +177,27 @@ int scx_static_init(size_t alloc_pages)
 	scx_ll_t *ll;
 	int ret;
 
+	CHECK();
 	ret = asan_init();
 	if (ret) {
 		bpf_printk("Failed to initialize asan_state");
 		return ret;
 	}
 
+	CHECK();
 	memory = bpf_arena_alloc_pages(&arena, NULL, alloc_pages, NUMA_NO_NODE, 0);
-	if (!memory)
+	if (!memory) {
+		bpf_printk("Failed to allocate %d pages", alloc_pages);
 		return -ENOMEM;
-	asan_poison(memory, max_bytes);
+	}
+
+	ret = asan_poison(memory, max_bytes);
+	if (ret)
+		bpf_printk("Error %d: by poisoning");
+
+//	ret = asan_unpoison(memory, sizeof(*ll));
+//	if (ret)
+//		bpf_printk("Error %d: by unpoisoning");
 
 	ll = (scx_ll_t *)memory;
 	ll->next = NULL;
@@ -190,6 +213,8 @@ int scx_static_init(size_t alloc_pages)
 		.cur_memusage = max_bytes,
 	};
 	bpf_spin_unlock(&static_lock);
+
+	CHECK();
 
 	return 0;
 }

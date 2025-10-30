@@ -296,4 +296,8 @@ int scx_ffs(__u64 word)
 #define round_up(a, b) (div_round_up((a), (b)) * (b))
 #endif
 
+extern volatile u64 asan_violated;
+
+#define CHECK() do { if (asan_violated != 0) { bpf_printk("ASAN violation found at %s:%d (%lx)", __func__, __LINE__, asan_violated); } asan_violated = 0; } while (0)
+
 #endif	/* __SCX_COMMON_BPF_H */

@@ -7,6 +7,7 @@
 #include <scx/common.bpf.h>
 #include <lib/sdt_task.h>
 
+#include <alloc/asan.h>
 #include <alloc/static.h>
 
 #include "selftest.h"
@@ -14,7 +15,7 @@
 /* XXX Some ARM systems have larger page sizes. */
 #define PAGE_SHIFT		12
 
-#define ST_MAX_PAGES		128
+#define ST_MAX_PAGES		8
 #define ST_MAX_BYTES		(ST_MAX_PAGES << PAGE_SHIFT)
 #define ST_MAX_ALIGNMENT	(ST_MAX_BYTES >> 4)
 
@@ -282,40 +283,82 @@ int scx_selftest_static(void)
 
 #define TEST_MESSAGE(msg, ...) do { bpf_printk("[%s] (%d) " msg, __func__, __LINE__, ##__VA_ARGS__); } while (0)
 
+__weak
+int break_opts(u8 __arena __arg_arena *mem)
+{
+	*mem += 1;
+	return 0;
+}
+
+struct blob {
+	volatile u8 mem[64];
+	u8 oob;
+};
+
+#define VAL(addr) do { bpf_printk("%s:%d Got %lx -> (val: %x gran: %x set: [%s])", __func__, __LINE__, addr, asan_shadow_value((addr)), ASAN_GRANULE(addr), asan_shadow_set((addr)) ? "yes" : "no"); } while (0)
+
 /*
  * Not a test that should be passing - used to trigger ASAN failures.
  */
 SEC("syscall")
 int static_asan_test(void)
 {
-	const size_t alignment = 8;
-	const size_t size = 24; 
-	u8 __arena *mem;
+	const size_t alignment = 1;
+	const size_t bytes = 64; 
+	volatile u8 __arena *mem;
+	volatile struct blob __arena *blob;
+	volatile struct blob __arena *blob2;
 	int ret;
 	int i;
 
 	ret = scx_static_init(ST_MAX_PAGES);
 	if (ret) {
 		bpf_printk("scx_static_init failed with %d", ret);
-		return ret;
+		return 0;
 	}
 
-	TEST_MESSAGE("writing %d bytes", size);
+	CHECK();
 
-	mem = ALLOC_OR_FAIL(size, alignment);
-
-	TEST_MESSAGE("accessing all valid bytes");
-
-	for (i = 0; i < size && can_loop; i++) {
-		mem[i] = 0xab;
+	mem = scx_static_alloc(bytes, alignment);
+	if (!mem) {
+		bpf_printk("Failed to allocate %d bytes");
+		return -ENOMEM;
 	}
 
-	TEST_MESSAGE("off-by-one OOB");
+	CHECK();
 
-	mem[size] = 0xee;
+	for (i = 0; i < bytes && can_loop; i++) {
+		mem[i] = 0x5a;
+//		VAL(&mem[i]);
+		CHECK();
+	}
+
+	CHECK();
+
+	/* ASAN violation */
+	for (i = 0; i < bytes && can_loop; i++) {
+		mem[bytes + i] = 0x5a;
+		CHECK();
+	}
+
+	CHECK();
+
+	blob = scx_static_alloc(sizeof(blob) - 1, alignment);
+	blob->oob = 5;
+//	VAL(blob);
+//	VAL(&blob->oob);
+	blob2 = (volatile struct blob __arena *)&blob->oob;
+	blob2->oob = 5;
+
+//	VAL(&blob2->oob);
+//	asan_violation_address = 0;
+//	asan_violation_offset = 0;
+//
+	CHECK();
 
 	scx_static_destroy();
 
-	return 0;
-}
 
+	return 0;
+
+}

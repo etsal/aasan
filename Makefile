@@ -1,7 +1,7 @@
 .PHONY: all clean
 
 all:
-	$(MAKE) -C selftests
+	$(MAKE) -C selftests selftest
 	./selftests/selftest
 
 clean:

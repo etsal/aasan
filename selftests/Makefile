@@ -1,6 +1,6 @@
 .PHONY: clean test
 
-BPF_SOURCES = $(wildcard selftest.bpf.c) $(wildcard ../lib/*.bpf.c) $(wildcard ../alloc/*.bpf.c)
+BPF_SOURCES = $(wildcard *.bpf.c) $(wildcard ../lib/*.bpf.c) $(wildcard ../alloc/*.bpf.c)
 BPF_OBJECTS = $(notdir $(BPF_SOURCES:.bpf.c=.bpf.o))
 vpath %.bpf.c ../alloc ../lib .
 
