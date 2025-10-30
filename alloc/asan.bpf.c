@@ -4,10 +4,13 @@
 #include <lib/arena_map.h>
 #include <alloc/asan.h>
 
+#pragma clang attribute push(__attribute__((no_sanitize("address"))), apply_to=function)
+
 /*
  * Implementation based on mm/kasan/generic.c.
  */
 
+volatile bool asan_violated = false;
 
 /* XXX Remove the hardcoded values and change them with:
  * - Offset is 7/8ths of the arena.
@@ -16,9 +19,9 @@
  */
 
 /* Last 1/8th of the address space. */
-#define KASAN_SHADOW_OFFSET (0xe0000000)
-#define KASAN_SHADOW_SIZE (0x10000000)
-#define ARENA_LIMIT (1ULL << 32)
+#define KASAN_SHADOW_OFFSET ((1ULL << 19))
+#define KASAN_SHADOW_SIZE (1ULL << 17)
+#define ARENA_LIMIT (1ULL << 20)
 
 /*
  * XXX Shadow map occupancy map (see comment in arena_init.c and the 
@@ -171,9 +174,10 @@ static __always_inline void asan_report(arenaptr addr, size_t sz, bool write)
 {
 	/* Only report the first ASAN violation. */
 	if (likely(!reported)) {
-		bpf_printk("[ARENA ASAN] Poisoned %s at address [%p, %p)", "[TODO]", NULL, NULL);
+		//bpf_printk("[ARENA ASAN] Poisoned %s at address [%p, %p)", "[TODO]", NULL, NULL);
 		reported = true;
 	}
+	asan_violated = true;
 
 	/* XXX Flesh out. */
 }
@@ -191,7 +195,7 @@ static __always_inline bool check_region_inline(void *ptr, size_t size, bool wri
 	 * is a misinterpreted negative number.
 	 */
 	if (unlikely(addr + size < addr)) {
-		bpf_printk("[ARENA_ASAN] Wraparound detected");
+		//bpf_printk("[ARENA_ASAN] Wraparound detected");
 		asan_report(addr, size, write);
 		return false;
 	}
@@ -201,7 +205,7 @@ static __always_inline bool check_region_inline(void *ptr, size_t size, bool wri
 	 * region. Possible when attempting to access the shadow map itself.
 	 */
 	if (unlikely((u64)mem_to_shadow(addr + size - 1) >= ARENA_LIMIT)) {
-		bpf_printk("[ARENA_ASAN] Shadow map access");
+		//bpf_printk("[ARENA_ASAN] Shadow map access");
 		asan_report(addr, size, write);
 		return false;
 	}
@@ -219,34 +223,42 @@ static __always_inline bool check_region_inline(void *ptr, size_t size, bool wri
  * XXX Is it a problem that the definition of __asan_store passes an address?
  */
 #define DEFINE_ASAN_LOAD_STORE(size)						\
+	__hidden								\
 	void __asan_store##size(void *addr)					\
 	{									\
 		check_region_inline(addr, size, true);				\
 	}									\
+	__hidden								\
 	void __always_inline __asan_store##size##_noabort(void *addr)		\
 	{									\
 		__asan_store##size(addr);					\
 	}									\
+	__hidden								\
 	void __asan_load##size(void *addr)					\
 	{									\
 		check_region_inline(addr, size, false);				\
 	}									\
+	__hidden								\
 	void __always_inline __asan_load##size##_noabort(void *addr)		\
 	{									\
 		__asan_load##size(addr);					\
 	}									\
+	__hidden								\
 	void __asan_report_store##size(void *addr)		\
 	{									\
 		asan_report((arenaptr)addr, size, true);			\
 	}									\
+	__hidden								\
 	void __asan_report_store##size##_noabort(void *addr)	\
 	{									\
 		asan_report((arenaptr)addr, size, true);			\
 	}									\
+	__hidden								\
 	void __asan_report_load##size(void *addr)		\
 	{									\
 		asan_report((arenaptr)addr, size, false);			\
 	}									\
+	__hidden								\
 	void __asan_report_load##size##_noabort(void *addr)	\
 	{									\
 		asan_report((arenaptr)addr, size, false);			\
@@ -262,17 +274,10 @@ void __asan_storeN(void *addr, ssize_t size)
 	check_region_inline(addr, size, false);
 }
 
-//__alias(__asan_storeN) void __asan_storeN_noabort(void *);
-
 void __asan_loadN(void *addr, ssize_t size)
 {
 	check_region_inline(addr, size, true);
 }
-
-//__alias(__asan_loadN) void __asan_loadN_noabort(void *);
-
-
-/* XXX What is the equivalent of __asan_global that we should use? */
 
 void __asan_register_globals(void *globals, size_t n)
 {
@@ -303,57 +308,6 @@ void *__asan_memset(void *p, int c, size_t n)
 	return NULL; 
 }
 
-// Functions concerning RTL startup and initialization
-void __asan_init(void) {}
-void __asan_handle_no_return(void) {}
-
-// Functions concerning memory load and store reporting
-void __asan_report_load_n(void *p, size_t n, bool abort) {}
-void __asan_report_exp_load_n(void *p, size_t n, int exp, bool abort) {}
-void __asan_report_store_n(void *p, size_t n, bool abort) {}
-void __asan_report_exp_store_n(void *p, size_t n, int exp, bool abort) {}
-
-// Functions concerning query about whether memory is poisoned
-int __asan_address_is_poisoned(void const volatile *p) { return 0; }
-void *__asan_region_is_poisoned(void const volatile *p, size_t size) {
-  return NULL;
-}
-
-// Functions concerning the poisoning of memory
-void __asan_poison_memory_region(void const volatile *p, size_t n) {}
-void __asan_unpoison_memory_region(void const volatile *p, size_t n) {}
-
-// Functions concerning the partial poisoning of memory
-void __asan_set_shadow_xx_n(void *p, unsigned char xx, size_t n) {}
-
-// Functions concerning array cookie poisoning
-void __asan_poison_cxx_array_cookie(void *p) {}
-void *__asan_load_cxx_array_cookie(void **p) { return NULL; }
-
-// Functions concerning poisoning and unpoisoning fake stack alloca
-void __asan_alloca_poison(void *addr, size_t size)
-{
-}
-
-void __asan_allocas_unpoison(void *top, void *bottom)
-{
-}
-
-// Functions concerning fake stack malloc
-void *__asan_stack_malloc_n(size_t scale, size_t size)
-{
-	return NULL;
-}
-void *__asan_stack_malloc_always_n(size_t scale, size_t size)
-{
-  return NULL;
-}
-
-// Functions concerning fake stack free
-void __asan_stack_free_n(int scale, void *p, size_t n)
-{
-}
-
 /*
  * Poisoning code, used when we add more freed memory to the allocator by:
  * 	a) pulling memory from the arena segment using bpf_arena_alloc_pages()
@@ -374,7 +328,7 @@ int asan_poison(void __arena __arg_arena *addr, size_t size)
 	 */
 	if (unlikely((u64)addr & KASAN_GRANULE_MASK)) {
 		//bpf_printk("Poison region address not aligned to granule");
-		return 0;
+		return -1;
 	}
 
 	/*
@@ -398,9 +352,10 @@ int asan_poison(void __arena __arg_arena *addr, size_t size)
 	 */
 	if (unlikely(size & KASAN_GRANULE_MASK)) {
 		//bpf_printk("Poison region size not aligned to granule");
-		return 0;
+		return -2;
 	}
 
+	bpf_printk("Returning %p for %p (shadow is %p)", addr, (arenaptr)((u64) addr >> KASAN_SHADOW_SCALE) + (u64)__asan_shadow_memory_dynamic_address, (arenaptr)__asan_shadow_memory_dynamic_address);
 	shadow = mem_to_shadow(addr);
 	len = size / KASAN_SHADOW_SCALE;
 
@@ -470,6 +425,8 @@ int asan_init(void)
 {
 	void __arena *shadowmap;
 
+	CHECK();
+
 	if (inited)
 		return 0;
 
@@ -497,12 +454,24 @@ int asan_init(void)
 	 * XXX The shadowmap offset is hardcoded in mem_to_shadow, so we just allocate 
 	 * the pages and drop the returned address.
 	 */
-	shadowmap = bpf_arena_alloc_pages(&arena, (void __arena *)KASAN_SHADOW_OFFSET, KASAN_SHADOW_SIZE, NUMA_NO_NODE, 0);
-	if (!shadowmap)
+	shadowmap = bpf_arena_alloc_pages(&arena, (void __arena *)KASAN_SHADOW_OFFSET, 32, NUMA_NO_NODE, 0);
+	if (!shadowmap) {
+		bpf_printk("Could not allocate shadow map");
 		return -ENOMEM;
+	}
 
+	bpf_printk("got %p, expected %p", shadowmap, KASAN_SHADOW_OFFSET);
+
+	CHECK();
 	__asan_shadow_memory_dynamic_address = KASAN_SHADOW_OFFSET;
 
+	CHECK();
+
 	inited = true;
+
+	CHECK();
+
 	return 0;
 }
+
+#pragma clang attribute pop

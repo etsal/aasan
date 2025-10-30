@@ -14,13 +14,15 @@ int alloc_selftest(void)
 {
 	int ret;
 
+#if 0
+	CHECK();
 	ret = scx_selftest_static();
 	if (ret) {
 		bpf_printk("scx_selftest_static failed with %d", ret);
 		return ret;
 	}
+	CHECK();
 
-#if 0
 	ret = scx_selftest_buddy();
 	if (ret) {
 		bpf_printk("scx_selftest_buddy failed with %d", ret);

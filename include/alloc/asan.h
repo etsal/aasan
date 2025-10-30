@@ -8,3 +8,6 @@
 int asan_init(void);
 int asan_poison(void __arena *addr, size_t size);
 int asan_unpoison(void __arena *addr, size_t size);
+
+extern volatile bool asan_violated;
+#define CHECK() do { if (asan_violated) bpf_printk("ASAN violation found at %s:%d", __func__, __LINE__); asan_violated = 0; } while (0)

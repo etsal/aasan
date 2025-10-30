@@ -21,7 +21,7 @@
 #include <alloc/static.h>
 
 /* Maximum memory that can be allocated by the arena. */
-#define ARENA_MAX_MEMORY (1ULL << 32)
+#define ARENA_MAX_MEMORY (1ULL << 20)
 
 #include "asan.bpf.c"
 
@@ -172,19 +172,35 @@ int scx_static_init(size_t alloc_pages)
 	scx_ll_t *ll;
 	int ret;
 
+	CHECK();
 	ret = asan_init();
 	if (ret) {
 		bpf_printk("Failed to initialize asan_state");
 		return ret;
 	}
 
+	CHECK();
 	memory = bpf_arena_alloc_pages(&arena, NULL, alloc_pages, NUMA_NO_NODE, 0);
-	if (!memory)
+	if (!memory) {
+		bpf_printk("Failed to allocate %d pages", alloc_pages);
 		return -ENOMEM;
-	asan_poison(memory, max_bytes);
+	}
+	CHECK();
+	ret = asan_poison(memory, max_bytes);
+	if (ret)
+		bpf_printk("Error %d: by poisoning");
+
+	ret = asan_unpoison(memory, sizeof(*ll));
+	if (ret)
+		bpf_printk("Error %d: by unpoisoning");
+
+	CHECK();
 
 	ll = (scx_ll_t *)memory;
+	bpf_printk("Memory location %p", ll);
 	ll->next = NULL;
+
+	CHECK();
 
 	bpf_spin_lock(&static_lock);
 
@@ -197,6 +213,8 @@ int scx_static_init(size_t alloc_pages)
 		.cur_memusage = max_bytes,
 	};
 	bpf_spin_unlock(&static_lock);
+
+	CHECK();
 
 	return 0;
 }

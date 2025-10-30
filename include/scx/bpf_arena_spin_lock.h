@@ -77,7 +77,7 @@ struct arena_qnode {
  * 16-17: tail index
  * 18-31: tail cpu (+1)
  */
-#define _Q_MAX_CPUS		16384
+#define _Q_MAX_CPUS		128
 
 #define	_Q_SET_MASK(type)	(((1U << _Q_ ## type ## _BITS) - 1)\
 				      << _Q_ ## type ## _OFFSET)

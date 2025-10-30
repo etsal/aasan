@@ -8,7 +8,7 @@ BPFTOOL=bpftool
 
 INCLUDES=-I../include -I../include/arch -I ../include/arch/bpf-compat
 
-BPF_CFLAGS=--target=bpf -g -O2 -Wall -Wno-compare-distinct-pointer-types -D__TARGET_ARCH_x86 -mcpu=v3 -mlittle-endian -c
+BPF_CFLAGS=--target=bpf -g -O2 -Wall -Wno-compare-distinct-pointer-types -D__TARGET_ARCH_x86 -mcpu=v3 -mlittle-endian
 BPF_ASAN_FLAGS=-fsanitize=kernel-address -fno-stack-protector
 
 BPF_LLVM_FLAGS= -mllvm -asan-instrument-address-spaces=1

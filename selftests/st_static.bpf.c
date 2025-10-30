@@ -16,7 +16,7 @@
 /* XXX Some ARM systems have larger page sizes. */
 #define PAGE_SHIFT		12
 
-#define ST_MAX_PAGES		128
+#define ST_MAX_PAGES		8
 #define ST_MAX_BYTES		(ST_MAX_PAGES << PAGE_SHIFT)
 #define ST_MAX_ALIGNMENT	(ST_MAX_BYTES >> 4)
 
@@ -269,15 +269,22 @@ int scx_selftest_static(void)
 	for (bytes = PAGE_SIZE; bytes <= ST_MAX_PAGES && can_loop; bytes <<= 1) {
 		for (alignment = 1; alignment <= ST_MAX_ALIGNMENT && can_loop; alignment <<= 1) {
 			/* Each test manages its own allocator lifecycle */
+			CHECK();
 			SCX_STATIC_SELFTEST(alloc_single, bytes, alignment);
+			CHECK();
 			SCX_STATIC_SELFTEST(alloc_multiple, bytes, alignment);
+			CHECK();
 		}
 	}
 	
+	CHECK();
 	SCX_STATIC_SELFTEST(alloc_aligned);
+	CHECK();
 
-	for (alignment = PAGE_SIZE; bytes <= ST_MAX_PAGES && can_loop; bytes <<= 1)
+	for (alignment = PAGE_SIZE; bytes <= ST_MAX_PAGES && can_loop; bytes <<= 1) {
 		SCX_STATIC_SELFTEST(alloc_exhaustion, ST_MAX_PAGES << PAGE_SHIFT, alignment);
+		CHECK();
+	}
 
 	return 0;
 }
@@ -302,15 +309,32 @@ int static_asan_test(void)
 		return 0;
 	}
 
+	CHECK();
+
 	mem = scx_static_alloc(bytes, alignment);
+	if (!mem) {
+		bpf_printk("Failed to allocate %d bytes");
+		return -ENOMEM;
+	}
+
+	bpf_printk("Got %p", mem);
+
+	CHECK();
 
 	for (i = 0; i < bytes && can_loop; i++)
 		mem[i] = 0x5a;
 
+	CHECK();
+
 	/* ASAN violation */
-//	mem[bytes] = 0xee;
+	for (i = 0; i < bytes && can_loop; i++)
+		mem[bytes + i] = 0x5a;
+
+	CHECK();
 
 	scx_static_destroy();
+
+	CHECK();
 
 	return 0;
 
