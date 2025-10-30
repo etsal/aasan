@@ -399,7 +399,7 @@ int run_test(selftest_func func)
 
 int main(int argc, char *argv[])
 {
-	run_test(asan);
+	run_test(selftest_asan);
 
 	return 0;
 }
