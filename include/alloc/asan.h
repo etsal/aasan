@@ -1,5 +1,8 @@
 #pragma once
 
+#include <scx/common.bpf.h>
+#include <scx/bpf_arena_common.bpf.h>
+
 #define KASAN_SHADOW_SCALE 8
 #define KASAN_GRANULE_MASK ((1ULL << KASAN_SHADOW_SCALE) - 1)
 
