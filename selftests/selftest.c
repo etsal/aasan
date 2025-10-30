@@ -336,11 +336,17 @@ selftest_asan(struct selftest *skel)
 	int prog_fd;
 	int ret;
 
-	printf("===START static_asan_test START===\n");
-	prog_fd = bpf_program__fd(skel->progs.static_asan_test);
+	prog_fd = bpf_program__fd(skel->progs.asan_init);
 	assert(prog_fd >= 0 && "no program found");
 	ret = selftest_fd(prog_fd);
-	printf("===END  static_asan_test  END===\n");
+	if (ret)
+		return ret;
+
+	printf("===START asan_test_static START===\n");
+	prog_fd = bpf_program__fd(skel->progs.asan_test_static);
+	assert(prog_fd >= 0 && "no program found");
+	ret = selftest_fd(prog_fd);
+	printf("===END  asan_test_static  END===\n");
 
 	return ret;
 }
@@ -390,6 +396,7 @@ int run_test(selftest_func func)
 	ret = selftest__attach(skel);
 	VALIDATE(ret);
 
+	func(skel);
 	func(skel);
 
 	printf("Tests complete\n");

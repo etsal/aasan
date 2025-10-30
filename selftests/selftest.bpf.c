@@ -42,9 +42,9 @@ int alloc_selftest(void)
 SEC("syscall")
 int arena_selftest(void)
 {
+#if 0
 	int ret;
 
-#if 0
 	ret = scx_selftest_atq();
 	if (ret) {
 		bpf_printk("scx_selftest_atq failed with %d", ret);

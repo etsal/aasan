@@ -3,14 +3,37 @@
 #include <scx/common.bpf.h>
 #include <scx/bpf_arena_common.bpf.h>
 
-#define KASAN_SHADOW_SCALE 8
-#define KASAN_GRANULE_MASK ((1ULL << KASAN_SHADOW_SCALE) - 1)
+/* Last 1/8th of the address space. */
+#define ASAN_SHADOW_OFFSET ((1ULL << 25))
+#define ASAN_SHADOW_SIZE (1ULL << 18)
 
-#define KASAN_GRANULE(expr) (((u64)expr) & KASAN_GRANULE_MASK)
+#define ASAN_SHADOW_SHIFT 3
+#define ASAN_SHADOW_SCALE (1ULL << ASAN_SHADOW_SHIFT)
+#define ASAN_GRANULE_MASK ((1ULL << ASAN_SHADOW_SHIFT) - 1)
+#define ASAN_GRANULE(addr) ((s8)((u32)(u64)((addr)) & ASAN_GRANULE_MASK))
+
+#define __noasan __attribute__((no_sanitize("address"))) 
+
+/* Defined as char * to get 1-byte granularity for pointer arithmetic. */
+typedef s8 __arena s8a;
+
+static inline 
+s8a *mem_to_shadow(void __arena __arg_arena *addr)
+{
+	return (s8a *)(((u32)(u64)addr >> ASAN_SHADOW_SHIFT) + ASAN_SHADOW_OFFSET);
+}
+
+static inline __noasan
+s8 asan_shadow_value(void __arena __arg_arena *addr) 
+{
+	return *(s8a *)mem_to_shadow(addr);
+}
 
 int asan_init(void);
 int asan_poison(void __arena *addr, size_t size);
 int asan_unpoison(void __arena *addr, size_t size);
+bool asan_shadow_set(void __arena *addr);
+s8 asan_shadow_value(void __arena *addr);
 
 /*
  * Dummy calls to ensure the ASAN runtime's BTF information is present
@@ -62,13 +85,13 @@ do { 					\
 	ASAN_DUMMY_CALLS_SIZE(8, (arg));	\
 } while (0)
 
-extern u64 __asan_shadow_memory_dynamic_address;
+extern u32 __asan_shadow_memory_dynamic_address;
 
 __weak __attribute__((no_sanitize_address))
 int asan_dummy_call() {
 	/* Use the shadow map base to prevent it from being optimized out. */
 	if (__asan_shadow_memory_dynamic_address) 
-		ASAN_DUMMY_CALLS_ALL((void*)__asan_shadow_memory_dynamic_address);
+		ASAN_DUMMY_CALLS_ALL(NULL);
 
 	return 0;
 }

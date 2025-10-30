@@ -268,73 +268,15 @@ int scx_selftest_static(void)
 	for (bytes = PAGE_SIZE; bytes <= ST_MAX_PAGES && can_loop; bytes <<= 1) {
 		for (alignment = 1; alignment <= ST_MAX_ALIGNMENT && can_loop; alignment <<= 1) {
 			/* Each test manages its own allocator lifecycle */
-			CHECK();
 			SCX_STATIC_SELFTEST(alloc_single, bytes, alignment);
-			CHECK();
 			SCX_STATIC_SELFTEST(alloc_multiple, bytes, alignment);
-			CHECK();
 		}
 	}
 	
-	CHECK();
 	SCX_STATIC_SELFTEST(alloc_aligned);
-	CHECK();
 
-	for (alignment = PAGE_SIZE; bytes <= ST_MAX_PAGES && can_loop; bytes <<= 1) {
+	for (alignment = PAGE_SIZE; bytes <= ST_MAX_PAGES && can_loop; bytes <<= 1)
 		SCX_STATIC_SELFTEST(alloc_exhaustion, ST_MAX_PAGES << PAGE_SHIFT, alignment);
-		CHECK();
-	}
 
 	return 0;
-}
-
-#define TEST_MESSAGE(msg, ...) do { bpf_printk("[%s] (%d) " msg, __func__, __LINE__, ##__VA_ARGS__); } while (0)
-
-/*
- * Not a test that should be passing - used to trigger ASAN failures.
- */
-SEC("syscall")
-int static_asan_test(void)
-{
-	const size_t alignment = 8;
-	const size_t bytes = 24; 
-	u8 __arena *mem;
-	int ret;
-	int i;
-
-	ret = scx_static_init(ST_MAX_PAGES);
-	if (ret) {
-		bpf_printk("scx_static_init failed with %d", ret);
-		return 0;
-	}
-
-	CHECK();
-
-	mem = scx_static_alloc(bytes, alignment);
-	if (!mem) {
-		bpf_printk("Failed to allocate %d bytes");
-		return -ENOMEM;
-	}
-
-	bpf_printk("Got %p", mem);
-
-	CHECK();
-
-	for (i = 0; i < bytes && can_loop; i++)
-		mem[i] = 0x5a;
-
-	CHECK();
-
-	/* ASAN violation */
-	for (i = 0; i < bytes && can_loop; i++)
-		mem[bytes + i] = 0x5a;
-
-	CHECK();
-
-	scx_static_destroy();
-
-	CHECK();
-
-	return 0;
-
 }
