@@ -27,6 +27,10 @@ private(STATIC_ALLOC_LOCK) struct bpf_spin_lock static_lock;
 
 private(STATIC_ALLOC) struct scx_static scx_static;
 
+enum {
+	STATIC_POISON_UNINIT	= 0xff,
+};
+
 extern volatile u64 asan_violated;
 
 struct scx_ll;
@@ -96,7 +100,7 @@ u64 scx_static_alloc_internal(size_t bytes, size_t alignment)
 		if (!memory)
 			return (u64)NULL;
 
-		asan_poison(memory, scx_static.max_contig_bytes);
+		asan_poison(memory, STATIC_POISON_UNINIT, scx_static.max_contig_bytes);
 
 		bpf_spin_lock(&static_lock);
 
@@ -177,7 +181,7 @@ int scx_static_init(size_t alloc_pages)
 		return -ENOMEM;
 	}
 
-	ret = asan_poison(memory, max_bytes);
+	ret = asan_poison(memory, STATIC_POISON_UNINIT, max_bytes);
 	if (ret)
 		bpf_printk("Error %d: by poisoning");
 

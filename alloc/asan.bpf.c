@@ -12,12 +12,6 @@
 
 volatile u64 asan_violated = 0;
 
-/* XXX Remove the hardcoded values and change them with:
- * - Offset is 7/8ths of the arena.
- * - Size is 1/8th of the arena
- * - Limit is variable and found in the arena map.
- */
-
 u32 __asan_shadow_memory_dynamic_address;
 
 /*
@@ -28,14 +22,7 @@ u32 __asan_shadow_memory_dynamic_address;
 static bool reported = false;
 static bool inited = false;
 
-enum {
-	ASAN_POISON_UNINIT 	= (s8)0xff,
-	ASAN_POISON_FREED 	= (s8)0xfe,
-};
-
-/*
- * XXX Static key for turning ASAN off.
- */
+static bool asan_enabled = true;
 
 /*
  * BPF does not currently support the memset/memcpy/memcmp intrinsics.
@@ -116,6 +103,8 @@ static __always_inline unsigned long memory_is_poisoned(s8a *start, size_t size)
 	u64 addr = (u64)start;
 	unsigned long ret;
 
+	if (unlikely(!asan_enabled))
+		return false;
 	/*
 	 * If <= 16 and in this function we're probably unaligned and will
 	 * make two first_nonzero calls anyway, so bite the bullet now.
@@ -193,6 +182,9 @@ int asan_report(s8a __arg_arena *addr, size_t sz, bool write)
 static __always_inline bool check_region_inline(void *ptr, size_t size, bool write)
 {
 	s8a *addr = (s8a *)(u64)ptr;
+
+	if (unlikely(!asan_enabled))
+		return true;
 
 	/* Size 0 accesses are valid even if the address is invalid. */
 	if (unlikely(size == 0))
@@ -323,7 +315,7 @@ void *__asan_memset(void *p, int c, size_t n)
  * 	b) freeing memory from application code
  */
 __hidden __noasan
-int asan_poison(void __arena *addr, size_t size)
+int asan_poison(void __arena *addr, s8 val, size_t size)
 {
 	s8a *shadow;
 	size_t len;
@@ -363,7 +355,7 @@ int asan_poison(void __arena *addr, size_t size)
 	shadow = mem_to_shadow(addr);
 	len = size >> ASAN_SHADOW_SHIFT;
 
-	asan_memset(shadow, ASAN_POISON_UNINIT, len);
+	asan_memset(shadow, val, len);
 
 	return 0;
 }
@@ -417,11 +409,6 @@ int asan_unpoison(void __arena *addr, size_t size)
 		shadow[len] = partial;
 
 	return 0;
-}
-
-__hidden __noasan
-int asan_poison_pages(void __arena *addr, size_t nr_pages)
-{
 }
 
 /*

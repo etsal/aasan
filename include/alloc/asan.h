@@ -34,7 +34,7 @@ s8 asan_shadow_value(void __arena __arg_arena *addr)
 }
 
 int asan_init(void);
-int asan_poison(void __arena *addr, size_t size);
+int asan_poison(void __arena *addr, s8 val, size_t size);
 int asan_unpoison(void __arena *addr, size_t size);
 bool asan_shadow_set(void __arena *addr);
 s8 asan_shadow_value(void __arena *addr);
