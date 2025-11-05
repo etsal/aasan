@@ -318,7 +318,9 @@ selftest_alloc(struct selftest *skel)
 	int prog_fd;
 	int ret;
 
-	selftest_arena_alloc_reserve(skel);
+	ret = selftest_arena_alloc_reserve(skel);
+	if (ret)
+		return ret;
 
 	printf("===START alloc_selftest START===\n");
 	prog_fd = bpf_program__fd(skel->progs.alloc_selftest);
@@ -336,6 +338,10 @@ selftest_asan(struct selftest *skel)
 	int prog_fd;
 	int ret;
 
+	ret = selftest_arena_alloc_reserve(skel);
+	if (ret)
+		return ret;
+
 	prog_fd = bpf_program__fd(skel->progs.asan_init);
 	assert(prog_fd >= 0 && "no program found");
 	ret = selftest_fd(prog_fd);
@@ -346,7 +352,7 @@ selftest_asan(struct selftest *skel)
 	prog_fd = bpf_program__fd(skel->progs.asan_test_static);
 	assert(prog_fd >= 0 && "no program found");
 	ret = selftest_fd(prog_fd);
-	printf("===END  asan_test_static  END===\n");
+	printf("===END  asan_test_static  END===\n\n");
 
 	return ret;
 }
@@ -396,7 +402,6 @@ int run_test(selftest_func func)
 	ret = selftest__attach(skel);
 	VALIDATE(ret);
 
-	func(skel);
 	func(skel);
 
 	printf("Tests complete\n");

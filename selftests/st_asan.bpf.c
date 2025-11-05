@@ -203,5 +203,7 @@ int asan_test_static(void)
 		return ret;
 	}
 
+	bpf_printk("ASAN tests successful.");
+
 	return 0;
 }

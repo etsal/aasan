@@ -42,7 +42,6 @@ selftest.skel.h: main.bpf.o
 
 main.bpf.o: $(BPF_OBJECTS)
 	$(BPFTOOL) gen object $@ $^
-##	objcopy --change-section-address .addr_space.1=0x1000000 $@ $@
 
 %.bpf.o: %.bpf.c
 	clang $(BPF_FLAGS) -c $< -o $@
