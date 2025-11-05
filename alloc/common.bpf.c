@@ -7,7 +7,7 @@
 #include <lib/arena_map.h>
 
 /* How many pages do we reserve at the beginning of the arena segment? */
-#define RESERVE_ALLOC (16)
+#define RESERVE_ALLOC (8)
 
 SEC("syscall")
 int arena_alloc_reserve(void)

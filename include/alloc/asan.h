@@ -4,13 +4,17 @@
 #include <scx/bpf_arena_common.bpf.h>
 
 /* Last 1/8th of the address space. */
-#define ASAN_SHADOW_OFFSET ((1ULL << 25))
-#define ASAN_SHADOW_SIZE (1ULL << 18)
+#define ASAN_ARENA_SIZE (1ULL << 32)
+#define ASAN_SHADOW_SIZE (ASAN_ARENA_SIZE >> 3)
+#define ASAN_SHADOW_OFFSET (ASAN_ARENA_SIZE - ASAN_SHADOW_SIZE)
 
 #define ASAN_SHADOW_SHIFT 3
 #define ASAN_SHADOW_SCALE (1ULL << ASAN_SHADOW_SHIFT)
 #define ASAN_GRANULE_MASK ((1ULL << ASAN_SHADOW_SHIFT) - 1)
 #define ASAN_GRANULE(addr) ((s8)((u32)(u64)((addr)) & ASAN_GRANULE_MASK))
+
+/* XXX Find the page size from the running kernel. */
+#define PAGE_SHIFT (12)
 
 #define __noasan __attribute__((no_sanitize("address"))) 
 

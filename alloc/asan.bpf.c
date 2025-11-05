@@ -18,9 +18,6 @@ volatile u64 asan_violated = 0;
  * - Limit is variable and found in the arena map.
  */
 
-/* XXX Replace with actual arena size. */
-#define ARENA_LIMIT (1ULL << 20)
-
 u32 __asan_shadow_memory_dynamic_address;
 
 /*
@@ -30,6 +27,11 @@ u32 __asan_shadow_memory_dynamic_address;
 
 static bool reported = false;
 static bool inited = false;
+
+enum {
+	ASAN_POISON_UNINIT 	= (s8)0xff,
+	ASAN_POISON_FREED 	= (s8)0xfe,
+};
 
 /*
  * XXX Static key for turning ASAN off.
@@ -105,7 +107,7 @@ static __always_inline u64 first_nonzero_byte(u64 addr, size_t size)
 	 */
 	/* XXX Use the arena size directly from the map. */
 
-	return ARENA_LIMIT;
+	return ASAN_ARENA_SIZE;
 }
 
 static __always_inline unsigned long memory_is_poisoned(s8a *start, size_t size)
@@ -127,7 +129,7 @@ static __always_inline unsigned long memory_is_poisoned(s8a *start, size_t size)
 
 		/* Check for poison within prefix bytes. */
 		ret = first_nonzero_byte(addr, prefix);
-		if (unlikely(ret < ARENA_LIMIT))
+		if (unlikely(ret < ASAN_ARENA_SIZE))
 			return ret;
 
 		start += prefix;
@@ -162,7 +164,7 @@ static __always_inline bool memory_is_poisoned_n(s8a *addr, u64 size)
 	end = (u64)mem_to_shadow(addr + size - 1);
 
 	ret = first_nonzero_byte(start, (end - start) + 1);
-	if (likely(ret == ARENA_LIMIT))
+	if (likely(ret == ASAN_ARENA_SIZE))
 		return false;
 
 	return __builtin_expect(ret != end || ASAN_GRANULE(addr + size - 1) >= *(s8a *)end, false);
@@ -210,7 +212,7 @@ static __always_inline bool check_region_inline(void *ptr, size_t size, bool wri
 	 * The upper limit of the arena is an implicit guard around the shadow
 	 * region. Possible when attempting to access the shadow map itself.
 	 */
-	if (unlikely((u64)mem_to_shadow(addr + size - 1) >= ARENA_LIMIT)) {
+	if (unlikely((u64)mem_to_shadow(addr + size - 1) >= ASAN_ARENA_SIZE)) {
 		//bpf_printk("[ARENA_ASAN] Shadow map access");
 		asan_report(addr, size, write);
 		return false;
@@ -226,7 +228,6 @@ static __always_inline bool check_region_inline(void *ptr, size_t size, bool wri
 
 /*
  * __alias is not supported for BPF so define *__noabort() variants as wrappers.
- * XXX Is it a problem that the definition of __asan_store passes an address?
  */
 #define DEFINE_ASAN_LOAD_STORE(size)					\
 	__hidden							\
@@ -362,8 +363,7 @@ int asan_poison(void __arena *addr, size_t size)
 	shadow = mem_to_shadow(addr);
 	len = size >> ASAN_SHADOW_SHIFT;
 
-	/* Counts as (s8)-1 */
-	asan_memset(shadow, 0xff, len);
+	asan_memset(shadow, ASAN_POISON_UNINIT, len);
 
 	return 0;
 }
@@ -460,7 +460,8 @@ int asan_init(void)
 	 * XXX The shadowmap offset is hardcoded in mem_to_shadow, so we just allocate 
 	 * the pages and drop the returned address.
 	 */
-	shadowmap = (u64)bpf_arena_alloc_pages(&arena, (void __arena *)ASAN_SHADOW_OFFSET, 128, NUMA_NO_NODE, 0);
+	shadowmap = (u64)bpf_arena_alloc_pages(&arena, (void __arena *)ASAN_SHADOW_OFFSET, 
+		ASAN_SHADOW_SIZE >> PAGE_SHIFT, NUMA_NO_NODE, 0);
 	if (!shadowmap) {
 		bpf_printk("Could not allocate shadow map");
 		return -ENOMEM;
