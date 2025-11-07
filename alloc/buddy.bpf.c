@@ -1,7 +1,6 @@
 /*
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2024-2025 Meta Platforms, Inc. and affiliates.
- * Copyright (c) 2024-2025 Tejun Heo <tj@kernel.org>
  * Copyright (c) 2024-2025 Emil Tsalapatis <etsal@meta.com>
  */
 

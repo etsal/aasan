@@ -89,8 +89,6 @@ Basic functionality
 - [A] Add intrinsics to static allocator
     - Poisoning on chunk allocation
     - Unpoisoning on user allocation
-==================> WE ARE HERE
-- [M] (__)kasan_poison_pages
 - [T] Basic passing tests
 	- Get memory into the allocator and ensure it's poisoned
 	- Allocate memory to the user and ensure it's valid
@@ -100,6 +98,7 @@ Basic functionality
 	  	- Test with sizes 1 to 128
 	- Allocate with a set memory gap between allocations
 		- Has to be a multiple of GRANULE
+==================> WE ARE HERE
 
 Removing Temporary Workarounds
 ------------------------------

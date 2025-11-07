@@ -1,13 +1,28 @@
 /*
  * SPDX-License-Identifier: GPL-2.0
  * Copyright (c) 2024-2025 Meta Platforms, Inc. and affiliates.
- * Copyright (c) 2024-2025 Tejun Heo <tj@kernel.org>
  * Copyright (c) 2024-2025 Emil Tsalapatis <etsal@meta.com>
  */
 
 #include <scx/common.bpf.h>
 #include <lib/arena_map.h>
 #include <lib/sdt_task.h>
+
+/* 
+ * We keep the metadata in the allocator poisoned, and just suppress ASAN when running
+ * allocator code. This is an explicit tradeoff: We give up the ability to use ASAN
+ * for debugging allocator bugs to avoid errant application writes from accidentally
+ * finding and poisoning allocator memory. The stack allocator uses the beginning of 
+ * unallocated blocks to store segment metadata, and keeping the metadata poisoned
+ * makes it possible to track errant off-by-ones that would otherwise silently corrupt
+ * allocator metadata.
+ *
+ * This choice also keeps the poisoning/unpoisoning logic simple because we now only
+ * poison/unpoison entire pages, and only on alloc/free. We would otherwise need to 
+ * poison/unpoison the memory regions in the blocks that store segment metadata 
+ * every time we turn data into metadata and vice versa.
+ */
+#pragma clang attribute push(__attribute__((no_sanitize("address"))), apply_to=function)
 
 /*
  * Necessary for cond_break/can_loop's semantics. According to kernel commit
@@ -19,6 +34,10 @@
  * that the loop counter's value is imprecise.
  */
 static __u64 zero = 0;
+
+enum {
+	STACK_POISONED 		= (s8)0xef,
+};
 
 __hidden
 int scx_stk_init(struct scx_stk *stack, __u64 data_size, __u64 nr_pages_per_alloc)
@@ -53,11 +72,13 @@ void scx_stk_destroy(struct scx_stk *stack)
 	 */
 	for (seg = stack->reserve; seg && can_loop; seg = next) {
 		next = seg->next;
+		asan_unpoison(seg, sizeof(*seg));
 		bpf_arena_free_pages(&arena, seg, nr_pages);
 	}
 
 	for (seg = stack->first; seg && can_loop; seg = next) {
 		next = seg->next;
+		asan_unpoison(seg, sizeof(*seg));
 		bpf_arena_free_pages(&arena, seg, nr_pages);
 	}
 
@@ -91,7 +112,6 @@ static int scx_stk_push(struct scx_stk *stack, void __arena *elem)
 		if (!stk_seg)
 			return -ENOSPC;
 	}
-
 
 	stack->current = stk_seg;
 	stack->cind = ridx;
@@ -142,6 +162,7 @@ int scx_stk_seg_to_data(struct scx_stk *stack, size_t nelems)
 		return -ENOMEM;
 
 	data = (u64)stack->last;
+
 	stack->last->prev->next = NULL;
 	stack->last = stack->last->prev;
 
@@ -239,6 +260,8 @@ int scx_stk_get_arena_memory(struct scx_stk *stack, __u64 nr_pages, __u64 nstk_s
 	if (!mem)
 		return -ENOMEM;
 
+	asan_poison((void __arena *)mem, STACK_POISONED, nstk_segs * nr_pages * PAGE_SIZE);
+
 	bpf_spin_lock(&stack->lock);
 
 	_Static_assert(sizeof(struct scx_stk_seg) <= PAGE_SIZE,
@@ -246,6 +269,7 @@ int scx_stk_get_arena_memory(struct scx_stk *stack, __u64 nr_pages, __u64 nstk_s
 
 	/* Attach the segments to the reserve linked list. */
 	for (i = zero; i < nstk_segs && can_loop; i++) {
+		/* Keep the memory that hosts metadata unpoisoned.*/
 		stk_seg = (scx_stk_seg_t *)mem;
 		stk_seg->next = stack->reserve;
 		stack->reserve = stk_seg;
@@ -300,8 +324,7 @@ int scx_stk_fill_new_elems(struct scx_stk *stack)
 	if (stack->available > 0)
 		return 0;
 
-	/*
-	 * Otherwise add elements and possibly capacity to the stack. */
+	/* Otherwise add elements and possibly capacity to the stack. */
 	if (!stack->capacity) {
 		stk_seg = stack->reserve;
 		stack->reserve = stack->reserve->next;
@@ -326,7 +349,7 @@ int scx_stk_fill_new_elems(struct scx_stk *stack)
 	return 0;
 }
 
-__weak
+__hidden
 __u64 scx_stk_alloc(struct scx_stk *stack)
 {
 	void __arena *elem;
@@ -350,8 +373,11 @@ __u64 scx_stk_alloc(struct scx_stk *stack)
 	}
 
 	elem = scx_stk_pop(stack);
+	asan_unpoison(elem, stack->data_size);
+
 	bpf_spin_unlock(&stack->lock);
 
 	return (u64)elem;
 }
 
+#pragma clang attribute pop

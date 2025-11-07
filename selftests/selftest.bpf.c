@@ -26,13 +26,11 @@ int alloc_selftest(void)
 	}
 #endif
 
-#if 0
 	ret = scx_selftest_stack();
 	if (ret) {
 		bpf_printk("scx_selftest_stack failed with %d", ret);
 		return ret;
 	}
-#endif
 
 	bpf_printk("Alloc selftests successful.");
 

@@ -8,6 +8,7 @@
 #include <lib/sdt_task.h>
 
 #include <alloc/asan.h>
+#include <alloc/stack.h>
 #include <alloc/static.h>
 
 #include "selftest.h"
@@ -180,7 +181,86 @@ int asan_test_static_all(void)
 	return 0;
 }
 
-SEC("syscall")
+#define STACK_PAGES_PER_ALLOC (4)
+#define STACK_ALLOCS (4)
+
+private(ST_STACK) struct scx_stk st_stack;
+
+int asan_test_stack_uaf_oob_single(char __arena __arg_arena *alloced, char __arena __arg_arena *freed)
+{
+	const size_t overshoot = 5;
+	int i;
+
+	/* Use after free check. */
+	scx_stk_free(&st_stack, freed);
+
+	for (i = 0; i < PAGE_SIZE && can_loop; i++) {
+		freed[i] = 0xba;
+		ASAN_VALIDATE_ADDR(true, &freed[i]);
+	}
+
+	/* 
+	 * Out of bounds check. Assuming the blocks before were
+	 * allocated consecutively, past the end of the block
+	 * the memory is guaranteed to be freed.
+	 */
+	for (i = 0; i < PAGE_SIZE + overshoot && can_loop; i++) {
+		alloced[i] = 0xba;
+		ASAN_VALIDATE_ADDR(i >= PAGE_SIZE, &alloced[i]);
+	}
+
+	return 0;
+}
+
+int asan_test_stack_uaf_oob(void)
+{
+	char __arena *blocks[STACK_ALLOCS];
+	int ret, i;
+
+	ret = scx_stk_init(&st_stack, 1, STACK_PAGES_PER_ALLOC);
+	if (ret) {
+		bpf_printk("scx_stk_init failed with %d", ret);
+		return ret;
+	}
+
+	bpf_for(i, 0, STACK_ALLOCS) {
+		if (i > 0 && blocks[i] != blocks[i - 1] + PAGE_SIZE) {
+			bpf_printk("allocations not consecutive");
+			return -EINVAL;
+		}
+
+		blocks[i] = (void __arena *)scx_stk_alloc(&st_stack);
+		if (!blocks[i]) {
+			bpf_printk("allocation %d failed", i);
+			return -ENOMEM;
+		}
+	}
+
+	for (i = 0; i < STACK_ALLOCS && can_loop; i += 2) {
+		if (i + 1 >= STACK_ALLOCS)
+			break;
+
+		asan_test_stack_uaf_oob_single(blocks[i], blocks[i + 1]);
+	}
+
+	scx_stk_destroy(&st_stack);
+
+	return 0;
+}
+
+int asan_test_stack(void)
+{
+	int ret;
+
+	ret = asan_test_stack_uaf_oob();
+	if (ret) {
+		bpf_printk("%s:%d test failed", __func__, __LINE__);
+		return ret;
+	}
+
+	return 0;
+}
+
 int asan_test_static(void)
 {
 	int ret;
@@ -202,6 +282,22 @@ int asan_test_static(void)
 		bpf_printk("%s:%d test failed", __func__, __LINE__);
 		return ret;
 	}
+
+	return 0;
+}
+
+SEC("syscall")
+int asan_test(void)
+{
+	int ret;
+
+	ret = asan_test_static();
+	if (ret)
+		return ret;
+
+	ret = asan_test_stack();
+	if (ret)
+		return ret;
 
 	bpf_printk("ASAN tests successful.");
 
