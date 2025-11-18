@@ -5,6 +5,8 @@ BPF_OBJECTS = $(notdir $(BPF_SOURCES:.bpf.c=.bpf.o))
 vpath %.bpf.c ../alloc ../lib .
 
 BPFTOOL=bpftool
+LIBBPF_DIR=../bpftool/src/libbpf
+LIBBPF_A=$(LIBBPF_DIR)/libbpf.a
 
 INCLUDES=-I../include -I../include/arch -I ../include/arch/bpf-compat
 
@@ -20,11 +22,9 @@ BPF_LLVM_FLAGS+= -mllvm -asan-destructor-kind=none
 
 BPF_FLAGS=$(BPF_CFLAGS) $(BPF_ASAN_FLAGS) $(BPF_LLVM_FLAGS)
 
-BPF_CFLAGS+=-I../vmlinux -I/usr/include/bpf -I/usr/include/$(shell uname -m)-linux-gnu 
+BPF_CFLAGS+=-I../vmlinux -I/usr/include/bpf -I/usr/include/$(shell uname -m)-linux-gnu  -I$(LIBBPF_DIR)/include
 BPF_CFLAGS+=$(INCLUDES)
 
-LIBBPF_DIR=../bpftool/src/libbpf
-LIBBPF_A=$(LIBBPF_DIR)/libbpf.a
 CFLAGS=-O2 -no-pie
 CFLAGS+=$(INCLUDES)
 CFLAGS+=-I$(LIBBPF_DIR)/include
