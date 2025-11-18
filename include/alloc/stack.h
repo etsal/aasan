@@ -22,7 +22,7 @@ struct scx_stk_seg {
  * Extensible stack struct.
  */
 struct scx_stk {
-	struct bpf_spin_lock lock;
+//	struct bpf_spin_lock lock;
 
 	scx_stk_seg_t *first;	/* First stack segment. */
 	scx_stk_seg_t *last;

@@ -160,19 +160,23 @@ static __always_inline bool memory_is_poisoned_n(s8a *addr, u64 size)
 }
 
 
-__hidden
+__always_inline
 int asan_report(s8a __arg_arena *addr, size_t sz, bool write)
 {
+#if 0
 	/* Only report the first ASAN violation. */
 	if (likely(!reported)) {
 		//bpf_printk("[ARENA ASAN] Poisoned %s at address [%p, %p)", "[TODO]", NULL, NULL);
 		reported = true;
 	}
+#endif
+	reported = true;
 
-	if ((u64)addr)
-		asan_violated = (u64)addr;
-	else
-		asan_violated = (u64)-1;
+	asan_violated = (u64)addr + 4;
+//	if ((u64)addr)
+//		asan_violated = (u64)addr;
+//	else
+//		asan_violated = (u64)-1;
 
 	/* XXX Flesh out. */
 
