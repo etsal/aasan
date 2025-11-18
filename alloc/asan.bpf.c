@@ -160,7 +160,7 @@ static __always_inline bool memory_is_poisoned_n(s8a *addr, u64 size)
 }
 
 
-__always_inline
+static __always_inline
 int asan_report(s8a __arg_arena *addr, size_t sz, bool write)
 {
 #if 0

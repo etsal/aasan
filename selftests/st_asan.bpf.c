@@ -186,6 +186,7 @@ int asan_test_static_all(void)
 
 private(ST_STACK) struct scx_stk st_stack;
 
+__attribute__((no_sanitize("address")))
 int asan_test_stack_uaf_oob_single(char __arena __arg_arena *alloced, char __arena __arg_arena *freed)
 {
 	const size_t overshoot = 5;
@@ -195,30 +196,32 @@ int asan_test_stack_uaf_oob_single(char __arena __arg_arena *alloced, char __are
 	scx_stk_free(&st_stack, freed);
 
 	i = PAGE_SIZE;
-//	for (i = 0; i < PAGE_SIZE && can_loop; i++) {
+	for (i = 0; i < PAGE_SIZE && can_loop; i++) {
 		freed[i] = 0xba;
-//		ASAN_VALIDATE_ADDR(true, &freed[i]);
-//	}
+		ASAN_VALIDATE_ADDR(true, &freed[i]);
+	}
 
 	/* 
 	 * Out of bounds check. Assuming the blocks before were
 	 * allocated consecutively, past the end of the block
 	 * the memory is guaranteed to be freed.
 	 */
-//	for (i = 0; i < PAGE_SIZE + overshoot && can_loop; i++) {
+	for (i = 0; i < PAGE_SIZE + overshoot && can_loop; i++) {
 		alloced[i] = 0xba;
 		ASAN_VALIDATE_ADDR(i >= PAGE_SIZE, &alloced[i]);
-//	}
+	}
 
 	return 0;
 }
 
+__weak
 int asan_test_stack_uaf_oob(void)
 {
 	char __arena *blocks[STACK_ALLOCS];
 	int ret, i;
 
-	ret = scx_stk_init(&st_stack, 1, STACK_PAGES_PER_ALLOC);
+	/* Set the stack to support 4KiB allocations. */
+	ret = scx_stk_init(&st_stack, 4096, STACK_PAGES_PER_ALLOC);
 	if (ret) {
 		bpf_printk("scx_stk_init failed with %d", ret);
 		return ret;

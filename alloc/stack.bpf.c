@@ -170,6 +170,8 @@ int scx_stk_seg_to_data(struct scx_stk *stack, size_t nelems)
 	stack->capacity -= SCX_STK_SEG_MAX;
 
 	for (i = zero; i < nelems && can_loop; i++) {
+		asan_poison((void __arena *)data, STACK_POISONED, sizeof(struct scx_stk_seg));
+
 		ret = scx_stk_push(stack, (void __arena *)data);
 		if (ret)
 			return ret;
@@ -209,6 +211,8 @@ int scx_stk_free_unlocked(struct scx_stk *stack, void __arena *elem)
 
 	/* If no more room, repurpose the allocation into a segment. */
 	if (stack->capacity == 0) {
+		asan_unpoison(elem, sizeof(struct scx_stk_seg));
+
 		scx_stk_extend(stack, (scx_stk_seg_t *)elem);
 		return 0;
 	}
