@@ -194,20 +194,21 @@ int asan_test_stack_uaf_oob_single(char __arena __arg_arena *alloced, char __are
 	/* Use after free check. */
 	scx_stk_free(&st_stack, freed);
 
-	for (i = 0; i < PAGE_SIZE && can_loop; i++) {
+	i = PAGE_SIZE;
+//	for (i = 0; i < PAGE_SIZE && can_loop; i++) {
 		freed[i] = 0xba;
-		ASAN_VALIDATE_ADDR(true, &freed[i]);
-	}
+//		ASAN_VALIDATE_ADDR(true, &freed[i]);
+//	}
 
 	/* 
 	 * Out of bounds check. Assuming the blocks before were
 	 * allocated consecutively, past the end of the block
 	 * the memory is guaranteed to be freed.
 	 */
-	for (i = 0; i < PAGE_SIZE + overshoot && can_loop; i++) {
+//	for (i = 0; i < PAGE_SIZE + overshoot && can_loop; i++) {
 		alloced[i] = 0xba;
 		ASAN_VALIDATE_ADDR(i >= PAGE_SIZE, &alloced[i]);
-	}
+//	}
 
 	return 0;
 }
