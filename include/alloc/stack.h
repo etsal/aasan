@@ -22,7 +22,7 @@ struct scx_stk_seg {
  * Extensible stack struct.
  */
 struct scx_stk {
-//	struct bpf_spin_lock lock;
+	arena_spinlock_t __arena *lock;
 
 	scx_stk_seg_t *first;	/* First stack segment. */
 	scx_stk_seg_t *last;
@@ -42,7 +42,8 @@ struct scx_stk {
 #ifdef __BPF__
 
 u64 scx_stk_alloc(struct scx_stk *stack);
-int scx_stk_init(struct scx_stk *stackp, __u64 data_size, __u64 nr_pages_per_alloc);
+int scx_stk_init(struct scx_stk *stackp, arena_spinlock_t __arena *lock,
+		__u64 data_size, __u64 nr_pages_per_alloc);
 void scx_stk_destroy(struct scx_stk *stack);
 int scx_stk_free_internal(struct scx_stk *stack, __u64 elem);
 

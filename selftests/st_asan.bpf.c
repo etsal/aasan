@@ -184,10 +184,98 @@ int asan_test_static_all(void)
 #define STACK_PAGES_PER_ALLOC (4)
 #define STACK_ALLOCS (4)
 
+/* 
+ * Keep this test-related array in BSS to avoid
+ * overly burdening the function stack.
+ */
+u64 stk_blks[STACK_ALLOCS];
+
+/*
+ * Spinlock used by the stack allocator.
+ */
 private(ST_STACK) struct scx_stk st_stack;
+arena_spinlock_t __arena stk_lock;
+
+struct qsort_limits {
+	int lo;
+	int hi;
+};
+
+__hidden
+void swap(int i, int j)
+{
+	u64 tmp;
+
+	tmp = stk_blks[i];
+	stk_blks[i] = stk_blks[j];
+	stk_blks[j] = tmp;
+}
+
+__weak
+int qsort_partition(struct qsort_limits limits)
+{
+	const int pivotval = stk_blks[limits.hi];
+	int pivot = limits.lo;
+	int i;
+
+	for (i = limits.lo; i < limits.hi && can_loop; i++) {
+		if (stk_blks[i] > pivotval)
+			continue;
+
+		swap(i, pivot);
+		pivot += 1;
+
+	}
+
+	swap(pivot, limits.hi);
+	
+	return pivot;
+}
+
+__weak
+void qsort_stack_blocks(void)
+{
+	struct qsort_limits stack[STACK_ALLOCS];
+	struct qsort_limits limits;
+	int stackind = 0;
+	int pivot;
+
+	limits = (struct qsort_limits){ 0, STACK_ALLOCS - 1};
+	stack[stackind++] = limits;
+
+	while (stackind > 0 && can_loop) {
+		if (stackind <= 0 || stackind >= STACK_ALLOCS) {
+			bpf_printk("%s:%d invalid stack index", __func__, __LINE__);
+			return;
+		}
+
+		limits = stack[--stackind];
+		if (limits.lo < 0 || limits.lo >= limits.hi)
+			continue;
+
+		pivot = qsort_partition(limits);
+		stack[stackind++] = (struct qsort_limits) {
+			.lo = limits.lo,
+			.hi = pivot - 1,
+		};
+
+		if (stackind <= 0 || stackind >= STACK_ALLOCS) {
+			bpf_printk("%s:%d invalid stack index", __func__, __LINE__);
+			return;
+		}
+
+		stack[stackind++] = (struct qsort_limits) {
+			.lo = pivot + 1,
+			.hi = limits.hi,
+		};
+	}
+
+	return;
+}
+
 
 __attribute__((no_sanitize("address")))
-int asan_test_stack_uaf_oob_single(char __arena __arg_arena *alloced, char __arena __arg_arena *freed)
+int asan_test_stack_uaf_oob_single(u8 __arena __arg_arena *alloced, u8 __arena __arg_arena *freed)
 {
 	const size_t overshoot = 5;
 	int i;
@@ -214,37 +302,68 @@ int asan_test_stack_uaf_oob_single(char __arena __arg_arena *alloced, char __are
 	return 0;
 }
 
+
+static
+int asan_check_allocator_blocks(u64 base)
+{
+	int i;
+
+	if (!stk_blks[0] || stk_blks[0] != base) {
+		bpf_printk("invalid base address");
+		return -EINVAL;
+	}
+
+	for (i = 1; i < STACK_ALLOCS; i++) {
+		if(!stk_blks[i]) {
+			bpf_printk("missing block");
+			return -EINVAL;
+		}
+
+		if (stk_blks[i] != stk_blks[i - 1] + PAGE_SIZE) {
+			bpf_printk("allocations not consecutive");
+			return -EINVAL;
+		}
+	}
+
+
+	return 0;
+}
+
 __weak
 int asan_test_stack_uaf_oob(void)
 {
-	char __arena *blocks[STACK_ALLOCS];
+	u64 base = (u64)(-1);
+	u64 block;
 	int ret, i;
 
 	/* Set the stack to support 4KiB allocations. */
-	ret = scx_stk_init(&st_stack, 4096, STACK_PAGES_PER_ALLOC);
+	ret = scx_stk_init(&st_stack, &stk_lock, 4096, STACK_PAGES_PER_ALLOC);
 	if (ret) {
 		bpf_printk("scx_stk_init failed with %d", ret);
 		return ret;
 	}
 
 	bpf_for(i, 0, STACK_ALLOCS) {
-		if (i > 0 && blocks[i] != blocks[i - 1] + PAGE_SIZE) {
-			bpf_printk("allocations not consecutive");
-			return -EINVAL;
-		}
-
-		blocks[i] = (void __arena *)scx_stk_alloc(&st_stack);
-		if (!blocks[i]) {
+		block = (u64)scx_stk_alloc(&st_stack);
+		if (!block) {
 			bpf_printk("allocation %d failed", i);
 			return -ENOMEM;
 		}
+
+		stk_blks[i] = block;
+		base = block < base ? block : base;
 	}
+
+	ret = asan_check_allocator_blocks(base);
+	if (ret)
+		return ret;
 
 	for (i = 0; i < STACK_ALLOCS && can_loop; i += 2) {
 		if (i + 1 >= STACK_ALLOCS)
 			break;
 
-		asan_test_stack_uaf_oob_single(blocks[i], blocks[i + 1]);
+		/* XXX Need base */
+		asan_test_stack_uaf_oob_single((u8 __arena *)stk_blks[i], (u8 __arena *)stk_blks[i + 1]);
 	}
 
 	scx_stk_destroy(&st_stack);
@@ -295,13 +414,20 @@ int asan_test(void)
 {
 	int ret;
 
+	bpf_printk("ASAN tests starting...");
+
 	ret = asan_test_static();
 	if (ret)
 		return ret;
 
+
+	bpf_printk("STATIC test passed...");
+
 	ret = asan_test_stack();
 	if (ret)
 		return ret;
+
+	bpf_printk("STACK test passed...");
 
 	bpf_printk("ASAN tests successful.");
 
