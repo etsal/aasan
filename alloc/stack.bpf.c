@@ -194,7 +194,7 @@ void scx_stk_extend(struct scx_stk *stack, scx_stk_seg_t *stk_seg)
 	stack->capacity += SCX_STK_SEG_MAX;
 
 	if (!stack->first)
-		stack->first = stk_seg;
+		stack->current = stack->first = stk_seg;
 
 	/*
 	 * Do not adjust the current segment/idx because we did not add
