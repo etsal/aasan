@@ -230,7 +230,9 @@ int scx_stk_free_internal(struct scx_stk *stack, __u64 elem)
 	if (!stack)
 		return -EINVAL;
 
-	arena_spin_lock(stack->lock);
+	ret = arena_spin_lock(stack->lock);
+	if (ret)
+		return ret;
 
 	ret = scx_stk_free_unlocked(stack, (void __arena *)elem);
 
@@ -243,8 +245,8 @@ static
 int scx_stk_get_arena_memory(struct scx_stk *stack, __u64 nr_pages, __u64 nstk_segs)
 {
 	scx_stk_seg_t *stk_seg;
+	int ret, i;
 	u64 mem;
-	int i;
 
 	arena_spin_unlock(stack->lock);
 
@@ -268,7 +270,9 @@ int scx_stk_get_arena_memory(struct scx_stk *stack, __u64 nr_pages, __u64 nstk_s
 
 	asan_poison((void __arena *)mem, STACK_POISONED, nstk_segs * nr_pages * PAGE_SIZE);
 
-	arena_spin_lock(stack->lock);
+	ret = arena_spin_lock(stack->lock);
+	if (ret)
+		return ret;
 
 	_Static_assert(sizeof(struct scx_stk_seg) <= PAGE_SIZE,
 		"segment must fit into a page");
@@ -366,7 +370,9 @@ __u64 scx_stk_alloc(struct scx_stk *stack)
 		return 0ULL;
 	}
 
-	arena_spin_lock(stack->lock);
+	ret = arena_spin_lock(stack->lock);
+	if (ret)
+		return 0ULL;
 
 	/* If segment buffer is empty, we have to populate it. */
 	if (stack->available == 0) {

@@ -188,21 +188,30 @@ int asan_test_static_all(void)
  * Keep this test-related array in BSS to avoid
  * overly burdening the function stack.
  */
-u64 stk_blks[STACK_ALLOCS];
+u64 __arena stk_blks[STACK_ALLOCS];
 
 /*
  * Spinlock used by the stack allocator.
  */
 private(ST_STACK) struct scx_stk st_stack;
-arena_spinlock_t __arena stk_lock;
+u64 __arena stk_lock;
+
+static __maybe_unused
+void stk_blks_dump(void)
+{
+	int i;
+
+	for (i = 0; i < STACK_ALLOCS; i++)
+		bpf_printk("[%d] 0x%lx", i, stk_blks[i]);
+}
 
 struct qsort_limits {
 	int lo;
 	int hi;
 };
 
-__hidden
-void swap(int i, int j)
+__always_inline
+void swap(unsigned int i, unsigned int j)
 {
 	u64 tmp;
 
@@ -212,48 +221,55 @@ void swap(int i, int j)
 }
 
 __weak
-int qsort_partition(struct qsort_limits limits)
+int qsort_partition(unsigned int lo, unsigned hi)
 {
-	const int pivotval = stk_blks[limits.hi];
-	int pivot = limits.lo;
-	int i;
+	unsigned int i;
+	u64 pivotval;
+	int pivot;
 
-	for (i = limits.lo; i < limits.hi && can_loop; i++) {
-		if (stk_blks[i] > pivotval)
+	if (lo >= STACK_ALLOCS || hi >= STACK_ALLOCS) {
+		bpf_printk("%s:%d invalid lo/hi indices %d/%d", __func__, __LINE__, lo, hi);
+		return 0;
+	}
+
+	pivotval = stk_blks[hi];
+	pivot = lo;
+
+	for (i = lo; i < hi && can_loop; i++) {
+		if (stk_blks[i] >= pivotval)
 			continue;
 
 		swap(i, pivot);
 		pivot += 1;
-
 	}
 
-	swap(pivot, limits.hi);
+	swap(pivot, hi);
 	
 	return pivot;
 }
 
 __weak
-void qsort_stack_blocks(void)
+int qsort_stack_blocks(void)
 {
 	struct qsort_limits stack[STACK_ALLOCS];
 	struct qsort_limits limits;
 	int stackind = 0;
 	int pivot;
 
-	limits = (struct qsort_limits){ 0, STACK_ALLOCS - 1};
+	limits = (struct qsort_limits){ 0, STACK_ALLOCS - 1 };
 	stack[stackind++] = limits;
 
 	while (stackind > 0 && can_loop) {
-		if (stackind <= 0 || stackind >= STACK_ALLOCS) {
-			bpf_printk("%s:%d invalid stack index", __func__, __LINE__);
-			return;
+		if (stackind <= 0 || stackind > STACK_ALLOCS) {
+			bpf_printk("%s:%d invalid stack index %d", __func__, __LINE__, stackind);
+			return 0;
 		}
 
 		limits = stack[--stackind];
 		if (limits.lo < 0 || limits.lo >= limits.hi)
 			continue;
 
-		pivot = qsort_partition(limits);
+		pivot = qsort_partition(limits.lo, limits.hi);
 		stack[stackind++] = (struct qsort_limits) {
 			.lo = limits.lo,
 			.hi = pivot - 1,
@@ -261,16 +277,17 @@ void qsort_stack_blocks(void)
 
 		if (stackind <= 0 || stackind >= STACK_ALLOCS) {
 			bpf_printk("%s:%d invalid stack index", __func__, __LINE__);
-			return;
+			return 0;
 		}
 
 		stack[stackind++] = (struct qsort_limits) {
 			.lo = pivot + 1,
 			.hi = limits.hi,
 		};
+		bpf_printk("problem [%ld, %ld]", pivot + 1, limits.hi);
 	}
 
-	return;
+	return 0;
 }
 
 
@@ -302,14 +319,15 @@ int asan_test_stack_uaf_oob_single(u8 __arena __arg_arena *alloced, u8 __arena _
 	return 0;
 }
 
-
 static
-int asan_check_allocator_blocks(u64 base)
+int asan_sort_stack_blocks()
 {
 	int i;
 
-	if (!stk_blks[0] || stk_blks[0] != base) {
-		bpf_printk("invalid base address");
+	qsort_stack_blocks();
+
+	if (!stk_blks[0]) {
+		bpf_printk("NULL stack block pointer");
 		return -EINVAL;
 	}
 
@@ -337,7 +355,7 @@ int asan_test_stack_uaf_oob(void)
 	int ret, i;
 
 	/* Set the stack to support 4KiB allocations. */
-	ret = scx_stk_init(&st_stack, &stk_lock, 4096, STACK_PAGES_PER_ALLOC);
+	ret = scx_stk_init(&st_stack, (arena_spinlock_t __arena *)&stk_lock, 4096, STACK_PAGES_PER_ALLOC);
 	if (ret) {
 		bpf_printk("scx_stk_init failed with %d", ret);
 		return ret;
@@ -354,7 +372,7 @@ int asan_test_stack_uaf_oob(void)
 		base = block < base ? block : base;
 	}
 
-	ret = asan_check_allocator_blocks(base);
+	ret = asan_sort_stack_blocks();
 	if (ret)
 		return ret;
 
@@ -362,7 +380,6 @@ int asan_test_stack_uaf_oob(void)
 		if (i + 1 >= STACK_ALLOCS)
 			break;
 
-		/* XXX Need base */
 		asan_test_stack_uaf_oob_single((u8 __arena *)stk_blks[i], (u8 __arena *)stk_blks[i + 1]);
 	}
 
