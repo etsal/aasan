@@ -31,6 +31,8 @@
 
 #include "selftest.skel.h"
 
+static bool verbose = false;
+
 char *topo_command = "lscpu --all --parse \
 		      | cut -f 1,2,4,9 -d ',' \
 		      | tail -n +5";
@@ -267,9 +269,11 @@ selftest_fd(int prog_fd)
 
 	VALIDATE(ret);
 
-	printf("BPF stderr:\n");
-	while ((ret = bpf_prog_stream_read(prog_fd, 2, buf, 1024, NULL)) > 0)
-		printf("%.*s", ret, buf);
+	if (verbose) {
+		printf("BPF stderr:\n");
+		while ((ret = bpf_prog_stream_read(prog_fd, 2, buf, 1024, NULL)) > 0)
+			printf("%.*s", ret, buf);
+	}
 
 	VALIDATE(ret);
 
@@ -411,6 +415,11 @@ int run_test(selftest_func func)
 
 int main(int argc, char *argv[])
 {
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0)
+			verbose = true;
+	}
+
 	run_test(selftest_asan);
 
 	return 0;
