@@ -250,8 +250,6 @@ int scx_stk_get_arena_memory(struct scx_stk *stack, __u64 nr_pages, __u64 nstk_s
 	int ret, i;
 	u64 mem;
 
-	arena_spin_unlock(stack->lock);
-
 	/*
 	 * The code allocates new memory only as segments. The allocation and
 	 * free code freely typecasts the segment buffer into data that can be
@@ -271,10 +269,6 @@ int scx_stk_get_arena_memory(struct scx_stk *stack, __u64 nr_pages, __u64 nstk_s
 		return -ENOMEM;
 
 	asan_poison((void __arena *)mem, STACK_POISONED, nstk_segs * nr_pages * PAGE_SIZE);
-
-	ret = arena_spin_lock(stack->lock);
-	if (ret)
-		return ret;
 
 	_Static_assert(sizeof(struct scx_stk_seg) <= PAGE_SIZE,
 		"segment must fit into a page");
@@ -303,11 +297,8 @@ int scx_stk_fill_new_elems(struct scx_stk *stack)
 
 	nr_pages = stack->nr_pages_per_alloc;
 	nelems = (nr_pages * PAGE_SIZE) / stack->data_size;
-	if (nelems > SCX_STK_SEG_MAX) {
-		arena_spin_unlock(stack->lock);
-		bpf_printk("new elements must fit into a single segment");
+	if (nelems > SCX_STK_SEG_MAX)
 		return -EINVAL;
-	}
 
 	/* How many segments should we allocate? */
 	nstk_segs = stack->capacity ? 1 : 2;
@@ -351,10 +342,8 @@ int scx_stk_fill_new_elems(struct scx_stk *stack)
 	mem = (u64)stk_seg;
 	for (i = zero; i < nelems && can_loop; i++) {
 		ret = scx_stk_push(stack, (void __arena *)mem);
-		if (ret) {
-			arena_spin_unlock(stack->lock);
+		if (ret)
 			return ret;
-		}
 		mem += stack->data_size;
 	}
 
@@ -362,32 +351,40 @@ int scx_stk_fill_new_elems(struct scx_stk *stack)
 }
 
 __hidden
-__u64 scx_stk_alloc(struct scx_stk *stack)
+__u64 scx_stk_alloc_unlocked(struct scx_stk *stack)
 {
 	void __arena *elem;
 	int ret;
+
+	/* If segment buffer is empty, we have to populate it. */
+	if (stack->available == 0) {
+		/* The call drops the lock on error. */
+		ret = scx_stk_fill_new_elems(stack);
+		if (ret)
+			return 0ULL;
+	}
+
+	elem = scx_stk_pop(stack);
+	asan_unpoison(elem, stack->data_size);
+
+	return (__u64)elem;
+}
+
+
+__hidden
+__u64 scx_stk_alloc(struct scx_stk *stack)
+{
+	u64 elem;
 
 	if (!stack) {
 		bpf_printk("using uninitialized stack allocator");
 		return 0ULL;
 	}
 
-	ret = arena_spin_lock(stack->lock);
-	if (ret)
+	if (arena_spin_lock(stack->lock))
 		return 0ULL;
 
-	/* If segment buffer is empty, we have to populate it. */
-	if (stack->available == 0) {
-		/* The call drops the lock on error. */
-		ret = scx_stk_fill_new_elems(stack);
-		if (ret) {
-			bpf_printk("elem creation failed");
-			return 0ULL;
-		}
-	}
-
-	elem = scx_stk_pop(stack);
-	asan_unpoison(elem, stack->data_size);
+	elem = scx_stk_alloc_unlocked(stack);
 
 	arena_spin_unlock(stack->lock);
 
