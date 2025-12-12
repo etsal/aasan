@@ -8,6 +8,9 @@
 #include <lib/arena_map.h>
 #include <lib/sdt_task.h>
 
+/* XXXHACK Until we bootstrap the allocator directly. */
+static arena_spinlock_t __arena stklock;
+
 static
 u64 scx_next_pow2(__u64 n)
 {
@@ -207,7 +210,7 @@ int scx_buddy_init(struct scx_buddy *buddy, size_t size)
 	_Static_assert(SCX_BUDDY_CHUNK_PAGES > 0, "chunk must use one or more pages");
 
 	/* One allocation per chunk. */
-	ret = scx_stk_init(&buddy->stack, SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE, SCX_BUDDY_CHUNK_PAGES);
+	ret = scx_stk_init(&buddy->stack, &stklock, SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE, SCX_BUDDY_CHUNK_PAGES);
 	if (ret) {
 		buddy->min_alloc_bytes = 0;
 		return ret;
