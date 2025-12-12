@@ -29,7 +29,9 @@ do {									\
  */
 #define ASAN_VALIDATE_ADDR(cond, addr) 		\
 do { 						\
+	asm volatile ("" ::: "memory");		\
 	if ((asan_violated != 0) != (cond)) { 	\
+		bpf_printk("ASAN asan_violated %d", asan_violated); \
 		ASAN_MAP_STATE((addr)); 	\
 		return -EINVAL;			\
 	}					\
@@ -72,6 +74,10 @@ int asan_test_static_blob_one(void)
 	blob->oob = 4;
 	ASAN_VALIDATE_ADDR(true, &blob->oob);
 
+	/* 
+	 * Go even further, cast the OOB variable into 
+	 * another struct blob and access its own oob.
+	 */
 	blob = (volatile struct blob __arena *)&blob->oob;
 	blob->oob = 5;
 	ASAN_VALIDATE_ADDR(true, &blob->oob);
@@ -201,7 +207,7 @@ void stk_blks_dump(void)
 {
 	int i;
 
-	for (i = 0; i < STACK_ALLOCS; i++)
+	for (i = 0; i < STACK_ALLOCS && can_loop; i++)
 		bpf_printk("[%d] 0x%lx", i, stk_blks[i]);
 }
 
@@ -236,7 +242,7 @@ int qsort_partition(unsigned int lo, unsigned hi)
 	pivot = lo;
 
 	for (i = lo; i < hi && can_loop; i++) {
-		if (stk_blks[i] >= pivotval)
+		if (stk_blks[i] > pivotval)
 			continue;
 
 		swap(i, pivot);
@@ -266,7 +272,7 @@ int qsort_stack_blocks(void)
 		}
 
 		limits = stack[--stackind];
-		if (limits.lo < 0 || limits.lo >= limits.hi)
+		if (limits.lo >= limits.hi)
 			continue;
 
 		pivot = qsort_partition(limits.lo, limits.hi);
@@ -284,14 +290,12 @@ int qsort_stack_blocks(void)
 			.lo = pivot + 1,
 			.hi = limits.hi,
 		};
-		bpf_printk("problem [%ld, %ld]", pivot + 1, limits.hi);
 	}
 
 	return 0;
 }
 
 
-__attribute__((no_sanitize("address")))
 int asan_test_stack_uaf_oob_single(u8 __arena __arg_arena *alloced, u8 __arena __arg_arena *freed)
 {
 	const size_t overshoot = 5;
@@ -300,8 +304,7 @@ int asan_test_stack_uaf_oob_single(u8 __arena __arg_arena *alloced, u8 __arena _
 	/* Use after free check. */
 	scx_stk_free(&st_stack, freed);
 
-	i = PAGE_SIZE;
-	for (i = 0; i < PAGE_SIZE && can_loop; i++) {
+	bpf_for(i, 0, PAGE_SIZE) {
 		freed[i] = 0xba;
 		ASAN_VALIDATE_ADDR(true, &freed[i]);
 	}
@@ -311,7 +314,7 @@ int asan_test_stack_uaf_oob_single(u8 __arena __arg_arena *alloced, u8 __arena _
 	 * allocated consecutively, past the end of the block
 	 * the memory is guaranteed to be freed.
 	 */
-	for (i = 0; i < PAGE_SIZE + overshoot && can_loop; i++) {
+	bpf_for(i, 0, PAGE_SIZE + overshoot) {
 		alloced[i] = 0xba;
 		ASAN_VALIDATE_ADDR(i >= PAGE_SIZE, &alloced[i]);
 	}
@@ -351,11 +354,12 @@ __weak
 int asan_test_stack_uaf_oob(void)
 {
 	u64 base = (u64)(-1);
+	const u64 alloc_size = 4096;
 	u64 block;
 	int ret, i;
 
 	/* Set the stack to support 4KiB allocations. */
-	ret = scx_stk_init(&st_stack, (arena_spinlock_t __arena *)&stk_lock, 4096, STACK_PAGES_PER_ALLOC);
+	ret = scx_stk_init(&st_stack, (arena_spinlock_t __arena *)&stk_lock, alloc_size, STACK_PAGES_PER_ALLOC);
 	if (ret) {
 		bpf_printk("scx_stk_init failed with %d", ret);
 		return ret;
@@ -380,7 +384,14 @@ int asan_test_stack_uaf_oob(void)
 		if (i + 1 >= STACK_ALLOCS)
 			break;
 
-		asan_test_stack_uaf_oob_single((u8 __arena *)stk_blks[i], (u8 __arena *)stk_blks[i + 1]);
+		if (stk_blks[i] + alloc_size != stk_blks[i+1]) {
+			bpf_printk("Stack allocations not consecutive");
+			return -EINVAL;
+		}
+
+		ret = asan_test_stack_uaf_oob_single((u8 __arena *)stk_blks[i], (u8 __arena *)stk_blks[i + 1]);
+		if (ret)
+			return ret;
 	}
 
 	scx_stk_destroy(&st_stack);
@@ -436,7 +447,6 @@ int asan_test(void)
 	ret = asan_test_static();
 	if (ret)
 		return ret;
-
 
 	bpf_printk("STATIC test passed...");
 

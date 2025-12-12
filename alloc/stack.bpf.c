@@ -211,6 +211,8 @@ int scx_stk_free_unlocked(struct scx_stk *stack, void __arena *elem)
 	if (!stack)
 		return -EINVAL;
 
+	asan_poison(elem, STACK_POISONED, stack->data_size);
+
 	/* If no more room, repurpose the allocation into a segment. */
 	if (stack->capacity == 0) {
 		asan_unpoison(elem, sizeof(struct scx_stk_seg));

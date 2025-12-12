@@ -172,7 +172,7 @@ int asan_report(s8a __arg_arena *addr, size_t sz, bool write)
 #endif
 	reported = true;
 
-	asan_violated = (u64)addr + 4;
+	asan_violated = (u64)addr;
 //	if ((u64)addr)
 //		asan_violated = (u64)addr;
 //	else
