@@ -1,20 +1,20 @@
 .PHONY: clean test
 
-KERNEL=$(HOME)
+KERNEL=$(HOME)/linux
 
 BPF_SOURCES = $(wildcard *.bpf.c) $(wildcard ../lib/*.bpf.c) $(wildcard ../alloc/*.bpf.c)
 BPF_OBJECTS = $(notdir $(BPF_SOURCES:.bpf.c=.bpf.o))
 vpath %.bpf.c ../alloc ../lib .
 
-BPFTOOL=$(KERNEL)/linux/tools/bpf/bpftool
+BPFTOOL=$(KERNEL)/tools/bpf/bpftool/bpftool
 
-INCLUDES=-I../include -I../include/arch -I ../include/arch/bpf-compat
+INCLUDES=-I../include -I$(KERNEL)/tools/lib -I../include/arch -I ../include/arch/bpf-compat
 
 BPF_CFLAGS=--target=bpf -g -O2 -D__TARGET_ARCH_x86 -mcpu=v3 -mlittle-endian
 BPF_CFLAGS+=-Wall -Wno-compare-distinct-pointer-types -Wno-incompatible-pointer-types-discards-qualifiers
 BPF_ASAN_FLAGS=-fsanitize=kernel-address -fno-stack-protector -fno-builtin
 
-BPF_LLVM_FLAGS+= -mllvm -asan-instrument-address-spaces=1 -mllvm -asan-shadow-aspace=1 
+BPF_LLVM_FLAGS+= -mllvm -asan-instrument-address-spaces=1 -mllvm -asan-shadow-addr-space=1 
 BPF_LLVM_FLAGS+= -mllvm -asan-use-stack-safety=0 -mllvm -asan-stack=0 
 BPF_LLVM_FLAGS+= -mllvm -asan-kernel=1 
 BPF_LLVM_FLAGS+= -mllvm -asan-constructor-kind=none
@@ -22,13 +22,13 @@ BPF_LLVM_FLAGS+= -mllvm -asan-destructor-kind=none
 
 BPF_FLAGS=$(BPF_CFLAGS) $(BPF_ASAN_FLAGS) $(BPF_LLVM_FLAGS)
 
-BPF_CFLAGS+=-I../vmlinux -I/usr/include/bpf -I/usr/include/$(shell uname -m)-linux-gnu 
+BPF_CFLAGS+=-I../vmlinux -I$(KERNEL)/tools/lib -I/usr/include/$(shell uname -m)-linux-gnu 
 BPF_CFLAGS+=$(INCLUDES)
 
-LIBBPF_DIR=$(KERNEL)/linux/tools/lib/bpf
+LIBBPF_DIR=$(KERNEL)/tools/lib/bpf
 LIBBPF_A=$(LIBBPF_DIR)/libbpf.a
 CFLAGS=-O2 -no-pie
-CFLAGS+=$(INCLUDES)
+CFLAGS+=$(INCLUDES) 
 CFLAGS+=-I$(LIBBPF_DIR)/include
 LDFLAGS=$(LIBBPF_A) -lelf -lz -lzstd
 
