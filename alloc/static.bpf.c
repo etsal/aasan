@@ -183,11 +183,11 @@ int scx_static_init(size_t alloc_pages)
 
 	ret = asan_poison(memory, STATIC_POISON_UNINIT, max_bytes);
 	if (ret)
-		bpf_printk("Error %d: by poisoning");
+		bpf_printk("Error %d: by poisoning", ret);
 
 	ret = asan_unpoison(memory, sizeof(*ll));
 	if (ret)
-		bpf_printk("Error %d: by unpoisoning");
+		bpf_printk("Error %d: by poisoning", ret);
 
 	ll = (scx_ll_t *)memory;
 	ll->next = NULL;
@@ -213,19 +213,24 @@ int scx_static_memlimit(u64 lim_memusage)
 	bpf_spin_lock(&static_lock);
 
 	if (lim_memusage > ARENA_MAX_MEMORY)
-		return -EINVAL;
+		goto error;
 
 	/* We always allocate at a page granularity. */
 	if (lim_memusage % PAGE_SIZE)
-		return -EINVAL;
+		goto error;
 
 	/* Have we already overshot the limit? */
-	if (lim_memusage > scx_static.cur_memusage)
-		return -EINVAL;
+	if (lim_memusage < scx_static.cur_memusage)
+		goto error;
 
 	scx_static.lim_memusage = lim_memusage;
 
 	bpf_spin_unlock(&static_lock);
 
 	return 0;
+
+error:
+	bpf_spin_unlock(&static_lock);
+
+	return -EINVAL;
 }

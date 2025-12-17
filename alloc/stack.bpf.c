@@ -131,7 +131,7 @@ void __arena *scx_stk_pop(struct scx_stk *stack)
 	void __arena *elem;
 	int ridx = stack->cind;
 
-	/* Possibly loop into previous next segment. */
+	/* Possibly loop into previous segment. */
 	if (ridx == 0) {
 		ridx = SCX_STK_SEG_MAX;
 		stk_seg = stack->current->prev;
@@ -277,6 +277,8 @@ int scx_stk_get_arena_memory(struct scx_stk *stack, __u64 nr_pages, __u64 nstk_s
 	for (i = zero; i < nstk_segs && can_loop; i++) {
 		/* Keep the memory that hosts metadata unpoisoned.*/
 		stk_seg = (scx_stk_seg_t *)mem;
+		asan_unpoison(stk_seg, sizeof(*stk_seg));
+
 		stk_seg->next = stack->reserve;
 		stack->reserve = stk_seg;
 

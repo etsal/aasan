@@ -195,7 +195,7 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_stk *stk)
 			idx += 1 << ord;
 
 			/* Mark it as unpoisoned. */
-			buddy_header = chunk_get_header(chunk, i);
+			buddy_header = chunk_get_header(chunk, idx);
 			asan_unpoison(buddy_header, sizeof(*buddy_header));
 
 			/* Mark it free. */
@@ -287,7 +287,7 @@ int scx_buddy_destroy(struct scx_buddy *buddy, size_t size)
 		next = chunk->next;
 
 		/* Wholesale poison the entire block. */
-		asan_unpoison(chunk, SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE);
+		asan_poison(chunk, BUDDY_POISONED, SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE);
 		bpf_arena_free_pages(&arena, chunk, SCX_BUDDY_CHUNK_PAGES);
 	}
 
@@ -304,10 +304,10 @@ int scx_buddy_destroy(struct scx_buddy *buddy, size_t size)
 __weak
 u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 {
-	scx_buddy_header_t *header;
+	scx_buddy_header_t *header, *tmp_header;
 	u64 address;
 	u64 order = 0;
-	u32 idx;
+	u32 idx, tmpidx;
 
 	bpf_for(order, order_req, SCX_BUDDY_CHUNK_MAX_ORDER) {
 		if (chunk->order_indices[order] != SCX_BUDDY_CHUNK_ITEMS)
@@ -344,9 +344,18 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 
 		if (header_set_order(chunk, idx, order))
 			return (u64)NULL;
-		header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 
-		header->next_index = chunk->order_indices[order];
+		/* Push the header to the beginning of the order_indices list. */
+		tmpidx = chunk->order_indices[order];
+
+		header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
+		header->next_index = tmpidx;
+
+		if (tmpidx != SCX_BUDDY_CHUNK_ITEMS) {
+			tmp_header = chunk_get_header(chunk, tmpidx);
+			tmp_header->prev_index = idx;
+		}
+
 		chunk->order_indices[order] = idx;
 	}
 
@@ -452,7 +461,7 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 	asan_unpoison(header, sizeof(*header));
 
 	bpf_for(order, order, SCX_BUDDY_CHUNK_MAX_ORDER) {
-		buddy_idx = idx ^= 1 << order;
+		buddy_idx = idx ^ (1 << order);
 		buddy_header = chunk_get_header(chunk, buddy_idx);
 
 		/* Check if the buddy is not in the free list. */
@@ -468,14 +477,15 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 		if (buddy_header->prev_index != SCX_BUDDY_CHUNK_ITEMS) {
 			tmp_header = chunk_get_header(chunk, buddy_header->prev_index);
 			tmp_header->next_index = buddy_header->next_index;
-			buddy_header->next_index = SCX_BUDDY_CHUNK_ITEMS;
 		}
 
 		if (buddy_header->next_index != SCX_BUDDY_CHUNK_ITEMS) {
 			tmp_header = chunk_get_header(chunk, buddy_header->next_index);
 			tmp_header->prev_index = buddy_header->prev_index;
-			buddy_header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 		}
+			
+		buddy_header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
+		buddy_header->next_index = SCX_BUDDY_CHUNK_ITEMS;
 
 		if (header_set_order(chunk, buddy_idx, SCX_BUDDY_CHUNK_MAX_ORDER))
 			return 0;
@@ -493,6 +503,13 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 
 	order = header_get_order(chunk, idx);
 	header->next_index = chunk->order_indices[order];
+	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
+
+	if (header->next_index != SCX_BUDDY_CHUNK_ITEMS) {
+		tmp_header = chunk_get_header(chunk, header->next_index);
+		tmp_header->prev_index = idx;
+	}
+
 	chunk->order_indices[order] = idx;
 
 	return 0;

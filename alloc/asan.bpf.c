@@ -100,7 +100,7 @@ static __always_inline u64 first_nonzero_byte(u64 addr, size_t size)
 static __always_inline unsigned long memory_is_poisoned(s8a *start, size_t size)
 {
 	int prefix = (unsigned long)start % 8;
-	u64 addr = (u64)start;
+	u64 addr = (u64)mem_to_shadow(start);
 	unsigned long ret;
 
 	if (unlikely(!asan_enabled))
@@ -130,11 +130,8 @@ static __always_inline unsigned long memory_is_poisoned(s8a *start, size_t size)
 	 */
 	for (; size >= 8 && can_loop; size -= 8, addr += 8) {
 		/* We found poison, return the byte within it. */
-		if (unlikely(*(u64 *)start))
+		if (unlikely(*(u64 *)addr))
 			return first_nonzero_byte(addr, 8);
-
-		/* Otherwise keep going. */
-		addr += 8;
 	}
 
 	/* Check the end if non-aligned. */
@@ -214,7 +211,7 @@ static __always_inline bool check_region_inline(void *ptr, size_t size, bool wri
 		return false;
 	}
 
-	if (unlikely(memory_is_poisoned(addr, size))) {
+	if (unlikely(memory_is_poisoned(addr, size) != ASAN_ARENA_SIZE)) {
 		asan_report(addr, size, write);
 		return false;
 	}
@@ -244,7 +241,7 @@ static __always_inline bool check_region_inline(void *ptr, size_t size, bool wri
 	__hidden							\
 	void __asan_load##size##_noabort(void *addr)			\
 	{								\
-		check_region_inline(addr, size, true);			\
+		check_region_inline(addr, size, false);			\
 	}								\
 	__hidden							\
 	void __asan_report_store##size(void *addr)			\
