@@ -8,6 +8,10 @@
 #include <lib/arena_map.h>
 #include <lib/sdt_task.h>
 
+enum {
+	BUDDY_POISONED 		= (s8)0xef,
+};
+
 static
 u64 scx_next_pow2(__u64 n)
 {
@@ -26,6 +30,8 @@ u64 scx_next_pow2(__u64 n)
 static
 int header_set_order(scx_buddy_chunk_t *chunk, u64 offset, u8 order)
 {
+	u8 prev_order;
+
 	if (order >= SCX_BUDDY_CHUNK_MAX_ORDER) {
 		bpf_printk("setting invalid order");
 		return -EINVAL;
@@ -36,12 +42,20 @@ int header_set_order(scx_buddy_chunk_t *chunk, u64 offset, u8 order)
 		return -EINVAL;
 	}
 
-	if (offset & 0x1)
+	/* 
+	 * We store two order instances per byte, one per nibble.
+	 * Retain the existing nibble.
+	 */
+	prev_order = chunk->orders[offset / 2];
+	if (offset & 0x1) {
 		order &= 0xf;
-	else
+		order |= (prev_order & 0xf0);
+	} else {
 		order <<= 4;
+		order |= (prev_order & 0xf);
+	}
 
-	chunk->orders[offset / 2] |= order;
+	chunk->orders[offset / 2] = order;
 
 	return 0;
 }
@@ -115,8 +129,8 @@ scx_buddy_header_t *chunk_get_header(scx_buddy_chunk_t *chunk, size_t idx)
 static
 scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_stk *stk)
 {
+	scx_buddy_header_t *header, *buddy_header;
 	u64 order, ord, last_order;
-	scx_buddy_header_t *header;
 	scx_buddy_chunk_t *chunk;
 	u32 idx, cur_idx;
 	int i, power2;
@@ -126,6 +140,9 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_stk *stk)
 	if (!chunk)
 		return NULL;
 
+	/* Unpoison the chunk itself. */
+	asan_unpoison(chunk, sizeof(*chunk));
+
 	/*
 	 * Initialize the chunk by carving out the first page to hold the metadata struct above,
 	 * then dumping the rest of the pages into the allocator.
@@ -133,6 +150,8 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_stk *stk)
 
 	bpf_for (i, 0, SCX_BUDDY_CHUNK_ITEMS) {
 		header = chunk_get_header(chunk, i);
+		asan_unpoison(header, sizeof(*header));
+
 		header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 		header->next_index = SCX_BUDDY_CHUNK_ITEMS;
 		if (header_set_order(chunk, i, SCX_BUDDY_CHUNK_MAX_ORDER))
@@ -174,6 +193,10 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_stk *stk)
 		bpf_for (ord, order, last_order) {
 			/* Skip to the buddy. */
 			idx += 1 << ord;
+
+			/* Mark it as unpoisoned. */
+			buddy_header = chunk_get_header(chunk, i);
+			asan_unpoison(buddy_header, sizeof(*buddy_header));
 
 			/* Mark it free. */
 			chunk->order_indices[ord] = idx;
@@ -225,6 +248,7 @@ int scx_buddy_init(struct scx_buddy *buddy, size_t size, arena_spinlock_t __arg_
 		return ret;
 	}
 
+	/* Chunk is already properly unpoisoned if allocated. */
 	chunk = scx_buddy_chunk_get(&buddy->stack);
 
 	if (chunk) {
@@ -261,6 +285,9 @@ int scx_buddy_destroy(struct scx_buddy *buddy, size_t size)
 	 */
 	for (chunk = buddy->first_chunk; chunk && can_loop; chunk = next) {
 		next = chunk->next;
+
+		/* Wholesale poison the entire block. */
+		asan_unpoison(chunk, SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE);
 		bpf_arena_free_pages(&arena, chunk, SCX_BUDDY_CHUNK_PAGES);
 	}
 
@@ -299,6 +326,10 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 	if (header_set_order(chunk, idx, order_req))
 		return (u64)NULL;
 
+	/* 
+	 * Do not unpoison the address yet, will be done by the caller
+	 * because the caller has the exact allocation size requested.
+	 */
 	address = (u64)chunk_idx_to_mem(chunk, idx);
 
 	/* If we allocated from a larger-order chunk, split the buddies. */
@@ -308,6 +339,9 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 
 		/* Add the buddy of the allocation to the free list. */
 		header = chunk_get_header(chunk, idx);
+		/* Unpoison the buddy header */
+		asan_unpoison(header, sizeof(*header));
+
 		if (header_set_order(chunk, idx, order))
 			return (u64)NULL;
 		header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
@@ -344,10 +378,8 @@ u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size)
 		chunk = chunk->next;
 	} while (address == (u64)NULL && can_loop);
 
-	if (address) {
-		scx_buddy_unlock(buddy);
-		return address;
-	}
+	if (address)
+		goto done;
 
 	/* Get a new chunk. */
 	chunk = scx_buddy_chunk_get(&buddy->stack);
@@ -363,7 +395,20 @@ u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size)
 
 	address = scx_buddy_chunk_alloc(buddy->first_chunk, order);
 
+done:
 	scx_buddy_unlock(buddy);
+	if (!address)
+		return address;
+
+	/* 
+	 * Unpoison exactly the amount of bytes requested. If the
+	 * data is smaller than the header, we must poison any
+	 * unused bytes that were part of the header.
+	 */
+
+	if (size < sizeof(scx_buddy_header_t))
+		asan_poison((u8 __arena *)address, BUDDY_POISONED, sizeof(scx_buddy_header_t));
+	asan_unpoison((u8 __arena *)address, size);
 
 	return address;
 }
@@ -400,7 +445,13 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 	idx = (addr & SCX_BUDDY_CHUNK_OFFSET_MASK) / SCX_BUDDY_MIN_ALLOC_BYTES;
 	header = chunk_get_header(chunk, idx);
 
-	bpf_for(order, header_get_order(chunk, idx), SCX_BUDDY_CHUNK_MAX_ORDER) {
+	order = header_get_order(chunk, idx);
+
+	/* We have placed the header into the block itself, keep it unpoisoned. */
+	asan_poison((u8 __arena *)addr, BUDDY_POISONED, SCX_BUDDY_MIN_ALLOC_BYTES << order);
+	asan_unpoison(header, sizeof(*header));
+
+	bpf_for(order, order, SCX_BUDDY_CHUNK_MAX_ORDER) {
 		buddy_idx = idx ^= 1 << order;
 		buddy_header = chunk_get_header(chunk, buddy_idx);
 
@@ -414,7 +465,6 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 		if (chunk->order_indices[order] == buddy_idx)
 			chunk->order_indices[order] = buddy_header->next_index;
 
-		/* Pop */
 		if (buddy_header->prev_index != SCX_BUDDY_CHUNK_ITEMS) {
 			tmp_header = chunk_get_header(chunk, buddy_header->prev_index);
 			tmp_header->next_index = buddy_header->next_index;
@@ -431,6 +481,10 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 			return 0;
 
 		idx = idx < buddy_idx ? idx : buddy_idx;
+
+		/* Poison the buddy header now that it's unused. */
+		buddy_header = chunk_get_header(chunk, buddy_idx);
+		asan_poison(buddy_header, BUDDY_POISONED, sizeof(*buddy_header));
 
 		header = chunk_get_header(chunk, idx);
 		if (header_set_order(chunk, idx, order + 1))
