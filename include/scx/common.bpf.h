@@ -21,7 +21,7 @@
 #include "vmlinux.h"
 #endif
 
-#include <bpf/bpf_helpers.h>
+#include "bpf_helpers.h"
 #include <bpf/bpf_tracing.h>
 #include <asm-generic/errno.h>
 

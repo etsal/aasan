@@ -4,8 +4,11 @@
  */
 #include <scx/common.bpf.h>
 #include <scx/bpf_helpers.h>
+
 #include <lib/sdt_task.h>
 #include <lib/arena_map.h>
+
+#include <alloc/common.h>
 
 /* How many pages do we reserve at the beginning of the arena segment? */
 #define RESERVE_ALLOC (8)
@@ -16,11 +19,11 @@ int arena_alloc_reserve(void)
 	return bpf_arena_reserve_pages(&arena, NULL, RESERVE_ALLOC);
 }
 
-__weak int
-arena_bug_trigger(const char *file, int line)
+__weak __hidden int
+arena_bug_trigger(const char *func, const int line)
 {
-	volatile u8 __arena *nullptr = (u8 __arena *)0UL;
-	bpf_stream_printk(1, "[BUG] %s:%d", file, line);
+	volatile u8 __arena *nullptr = (u8 __arena *)0ULL;
+	arena_stdout("[BUG] %s:%d\n", func, line);
 
 	*nullptr = 0;
 

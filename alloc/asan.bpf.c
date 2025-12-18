@@ -34,7 +34,7 @@ int asan_memset(s8a __arg_arena *dst, s8 val, size_t size)
 
 	/* 
 	 * XXX Switching this to a may_goto confuses the verifier and 
-	 * prevents verification on bpf-next as of late December. 
+	 * prevents verification on bpf-next as of late December 2025.
 	 */
 	bpf_for(i, 0, size) {
 		dst[i] = val;
@@ -90,7 +90,7 @@ bool asan_shadow_set(void __arena __arg_arena *addr)
 static __always_inline u64 first_nonzero_byte(u64 addr, size_t size)
 {
 	while (size && can_loop) {
-		if (unlikely(*(s8 *)addr))
+		if (unlikely(*(s8a *)addr))
 			return addr;
 		addr += 1;
 		size -= 1;
@@ -102,48 +102,6 @@ static __always_inline u64 first_nonzero_byte(u64 addr, size_t size)
 	/* XXX Use the arena size directly from the map. */
 
 	return ASAN_ARENA_SIZE;
-}
-
-static __always_inline unsigned long memory_is_poisoned(s8a *start, size_t size)
-{
-	int prefix = (unsigned long)start % 8;
-	u64 addr = (u64)mem_to_shadow(start);
-	unsigned long ret;
-
-	if (unlikely(!asan_enabled))
-		return false;
-	/*
-	 * If <= 16 and in this function we're probably unaligned and will
-	 * make two first_nonzero calls anyway, so bite the bullet now.
-	 */
-	if (size <= 16)
-		return first_nonzero_byte(addr, size);
-
-	/* If shadow region not word-aligned, carve out the beginning. */
-	if (prefix) {
-		prefix = 8 - prefix;
-
-		/* Check for poison within prefix bytes. */
-		ret = first_nonzero_byte(addr, prefix);
-		if (unlikely(ret < ASAN_ARENA_SIZE))
-			return ret;
-
-		start += prefix;
-	}
-
-	/*
-	 * Now we can test for poison one word at a time.
-	 * Only do this for words where we care for all bytes.
-	 */
-	for (; size >= 8 && can_loop; size -= 8, addr += 8) {
-		/* We found poison, return the byte within it. */
-		if (unlikely(*(u64 *)addr))
-			return first_nonzero_byte(addr, 8);
-	}
-
-	/* Check the end if non-aligned. */
-
-	return first_nonzero_byte(addr, size);
 }
 
 static __always_inline bool memory_is_poisoned_n(s8a *addr, u64 size)
@@ -187,38 +145,73 @@ int asan_report(s8a __arg_arena *addr, size_t sz, bool write)
 	return 0;
 }
 
-static __always_inline bool check_region_inline(void *ptr, size_t size, bool write)
+static __always_inline bool check_asan_args(s8a* addr, size_t size, bool *result)
 {
-	s8a *addr = (s8a *)(u64)ptr;
+	bool valid = true;
 
 	if (unlikely(!asan_enabled))
-		return true;
+		goto confirmed_valid;
 
 	/* Size 0 accesses are valid even if the address is invalid. */
 	if (unlikely(size == 0))
-		return true;
+		goto confirmed_valid;
 
 	/*
 	 * Wraparound is possible for extremely high size. Possible if the size
 	 * is a misinterpreted negative number.
 	 */
-	if (unlikely(addr + size < addr)) {
-		//bpf_printk("[ARENA_ASAN] Wraparound detected");
-		asan_report(addr, size, write);
-		return false;
-	}
+	if (unlikely(addr + size < addr))
+		goto confirmed_invalid;
 
 	/*
 	 * The upper limit of the arena is an implicit guard around the shadow
 	 * region. Possible when attempting to access the shadow map itself.
 	 */
-	if (unlikely((u64)mem_to_shadow(addr + size - 1) >= ASAN_ARENA_SIZE)) {
-		//bpf_printk("[ARENA_ASAN] Shadow map access");
-		asan_report(addr, size, write);
-		return false;
+	if (unlikely((u64)mem_to_shadow(addr + size - 1) >= ASAN_ARENA_SIZE))
+		goto confirmed_invalid;
+
+	return false;
+
+confirmed_invalid:
+	valid = false;
+
+	/* FALLTHROUGH */
+confirmed_valid:
+	*result = valid;
+
+	return true;
+}
+
+/*
+ * XXX The "explicit" call to be used from outside without worrying
+ * about size. 
+ */
+
+static __always_inline bool check_region_inline(void *ptr, size_t size, bool write)
+{
+	s8a *addr = (s8a *)(u64)ptr;
+	bool is_poisoned, is_valid;
+
+	if (check_asan_args(addr, size, &is_valid)) {
+		if (!is_valid)
+			asan_report(addr, size, write);
+		return is_valid;
 	}
 
-	if (unlikely(memory_is_poisoned(addr, size) != ASAN_ARENA_SIZE)) {
+	switch (size) {
+		case 1:
+			is_poisoned = memory_is_poisoned_1(addr);
+			break;
+		case 2:
+		case 4:
+		case 8:
+			is_poisoned = memory_is_poisoned_2_4_8(addr, size);
+			break;
+		default:
+			is_poisoned = memory_is_poisoned_n(addr, size);
+	}
+
+	if (is_poisoned) {
 		asan_report(addr, size, write);
 		return false;
 	}

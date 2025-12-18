@@ -32,7 +32,7 @@ do {									\
 do { 						\
 	asm volatile ("" ::: "memory");		\
 	if ((asan_violated != 0) != (cond)) { 	\
-		bpf_printk("ASAN asan_violated %d", asan_violated); \
+		bpf_printk("ASAN asan_violated %lx", (u64)asan_violated); \
 		ASAN_MAP_STATE((addr)); 	\
 		return -EINVAL;			\
 	}					\
@@ -527,19 +527,23 @@ int asan_test_buddy_oob(void)
 	size_t sizes[] = { 7, 8, 16, 64, 256, 317, 512, 1024 };
 	int ret, i;
 
+	bpf_stream_printk(2, "[INIT STARTING] %s:%d\n", __func__, __LINE__);
 	ret = scx_buddy_init(&st_buddy, SCX_BUDDY_MIN_ALLOC_BYTES, (arena_spinlock_t __arena *)&st_asan_lock);
 	if (ret) {
 		bpf_printk("scx_buddy_init failed with %d", ret);
 		return ret;
 	}
+	bpf_stream_printk(2, "[INIT DONE] %s:%d\n", __func__, __LINE__);
 
 	bpf_for(i, 0, 7) {
+		bpf_stream_printk(2, "[ITER %d] %s:%d\n", i, __func__, __LINE__);
 		ret = asan_test_buddy_oob_single(sizes[i]);
 		if (ret) {
 			bpf_printk("%s:%d Failed for size %lu", __func__, __LINE__, sizes[i]);
 			scx_buddy_destroy(&st_buddy, 0);
 			return ret;
 		}
+		bpf_stream_printk(2, "[ITER %d] %s:%d\n", i, __func__, __LINE__);
 	}
 
 	scx_buddy_destroy(&st_buddy, 0);

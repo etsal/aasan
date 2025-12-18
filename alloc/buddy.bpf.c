@@ -7,6 +7,7 @@
 #include <scx/common.bpf.h>
 #include <lib/arena_map.h>
 #include <lib/sdt_task.h>
+#include <alloc/common.h>
 
 enum {
 	BUDDY_POISONED 		= (s8)0xef,
@@ -34,11 +35,12 @@ int header_set_order(scx_buddy_chunk_t *chunk, u64 offset, u8 order)
 
 	if (order > SCX_BUDDY_CHUNK_MAX_ORDER) {
 		bpf_printk("setting invalid order", order);
+		arena_bug_trigger(__func__, __LINE__);
 		return -EINVAL;
 	}
 
 	if (offset >= SCX_BUDDY_CHUNK_ITEMS) {
-		bpf_printk("setting order of invalid offset");
+		bpf_printk("setting order of invalid offset (%d, max %d)", offset, SCX_BUDDY_CHUNK_ITEMS);
 		return -EINVAL;
 	}
 
@@ -83,7 +85,6 @@ u64 size_to_order(size_t size)
 	u64 order;
 
 	if (unlikely(!size)) {
-		bpf_printk("size 0 has no order");
 		bpf_printk("size 0 has no order");
 		return 64;
 	}
@@ -321,6 +322,9 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 	if (order > SCX_BUDDY_CHUNK_MAX_ORDER)
 		return (u64)NULL;
 
+	if (!chunk)
+		bpf_stream_printk(2, "Invalid zero chunk");
+
 	idx = chunk->order_indices[order];
 	header = chunk_get_header(chunk, idx);
 	chunk->order_indices[order] = header->next_index;
@@ -386,7 +390,11 @@ u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size)
 		return (u64)NULL;
 
 	chunk = buddy->first_chunk;
+	address = 0ULL;
 	do {
+		if (!chunk)
+			break;
+
 		address = scx_buddy_chunk_alloc(chunk, order);
 		chunk = chunk->next;
 	} while (address == (u64)NULL && can_loop);
