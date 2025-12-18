@@ -41,7 +41,6 @@ struct scx_stk {
 
 #ifdef __BPF__
 
-u64 scx_stk_alloc_unlocked(struct scx_stk *stack);
 u64 scx_stk_alloc(struct scx_stk *stack);
 int scx_stk_init(struct scx_stk *stackp, arena_spinlock_t __arena *lock,
 		__u64 data_size, __u64 nr_pages_per_alloc);

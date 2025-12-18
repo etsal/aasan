@@ -27,13 +27,20 @@ static bool asan_enabled = true;
 /*
  * BPF does not currently support the memset/memcpy/memcmp intrinsics.
  */
-static __always_inline
-void asan_memset(s8a __arg_arena *dst, s8 val, size_t size)
+__always_inline
+int asan_memset(s8a __arg_arena *dst, s8 val, size_t size)
 {
 	int i;
 
-	for (i = 0; i < size && can_loop; i++)
+	/* 
+	 * XXX Switching this to a may_goto confuses the verifier and 
+	 * prevents verification on bpf-next as of late December. 
+	 */
+	bpf_for(i, 0, size) {
 		dst[i] = val;
+	}
+
+	return 0;
 }
 
 /* Validate a 1-byte access, always within a single byte. */

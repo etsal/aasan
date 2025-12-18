@@ -8,22 +8,6 @@
 #include <lib/arena_map.h>
 #include <lib/sdt_task.h>
 
-/* 
- * We keep the metadata in the allocator poisoned, and just suppress ASAN when running
- * allocator code. This is an explicit tradeoff: We give up the ability to use ASAN
- * for debugging allocator bugs to avoid errant application writes from accidentally
- * finding and poisoning allocator memory. The stack allocator uses the beginning of 
- * unallocated blocks to store segment metadata, and keeping the metadata poisoned
- * makes it possible to track errant off-by-ones that would otherwise silently corrupt
- * allocator metadata.
- *
- * This choice also keeps the poisoning/unpoisoning logic simple because we now only
- * poison/unpoison entire pages, and only on alloc/free. We would otherwise need to 
- * poison/unpoison the memory regions in the blocks that store segment metadata 
- * every time we turn data into metadata and vice versa.
- */
-#pragma clang attribute push(__attribute__((no_sanitize("address"))), apply_to=function)
-
 /*
  * Necessary for cond_break/can_loop's semantics. According to kernel commit
  * 011832b, the loop counter variable must be seen as imprecise and bounded
@@ -264,9 +248,15 @@ int scx_stk_get_arena_memory(struct scx_stk *stack, __u64 nr_pages, __u64 nstk_s
 	if (!stack)
 		return -EINVAL;
 
+	arena_spin_unlock(stack->lock);
+
 	mem = (__u64)bpf_arena_alloc_pages(&arena, NULL, nstk_segs * nr_pages, NUMA_NO_NODE, 0);
 	if (!mem)
 		return -ENOMEM;
+
+	ret = arena_spin_lock(stack->lock);
+	if (ret)
+		return ret;
 
 	asan_poison((void __arena *)mem, STACK_POISONED, nstk_segs * nr_pages * PAGE_SIZE);
 
@@ -299,8 +289,10 @@ int scx_stk_fill_new_elems(struct scx_stk *stack)
 
 	nr_pages = stack->nr_pages_per_alloc;
 	nelems = (nr_pages * PAGE_SIZE) / stack->data_size;
-	if (nelems > SCX_STK_SEG_MAX)
-		return -EINVAL;
+	if (nelems > SCX_STK_SEG_MAX) {
+		ret = -EINVAL;
+		goto error;
+	}
 
 	/* How many segments should we allocate? */
 	nstk_segs = stack->capacity ? 1 : 2;
@@ -317,8 +309,10 @@ int scx_stk_fill_new_elems(struct scx_stk *stack)
 	if (!stack->reserve || !stack->reserve->next) {
 		/* This call drops and retakes the lock. */
 		ret = scx_stk_get_arena_memory(stack, nr_pages, nstk_segs);
-		if (ret)
+		if (ret) {
+			/* No need to unlock, we dropped the lock in the call. */
 			return ret;
+		}
 	}
 
 	/*
@@ -345,14 +339,25 @@ int scx_stk_fill_new_elems(struct scx_stk *stack)
 	for (i = zero; i < nelems && can_loop; i++) {
 		ret = scx_stk_push(stack, (void __arena *)mem);
 		if (ret)
-			return ret;
+			goto error;
 		mem += stack->data_size;
 	}
 
 	return 0;
+
+
+	/* 
+	 * Drop the arena lock on error. On error we cannot
+	 * guarantee we can return with the lock held, so
+	 * make sure the lock is not taken for all error
+	 * paths.
+	 */
+error:
+	arena_spin_unlock(stack->lock);
+	return ret;
 }
 
-__hidden
+static inline
 __u64 scx_stk_alloc_unlocked(struct scx_stk *stack)
 {
 	void __arena *elem;
@@ -366,14 +371,18 @@ __u64 scx_stk_alloc_unlocked(struct scx_stk *stack)
 			return 0ULL;
 	}
 
+	/* An elem value of 0 implies error, drop the lock. */
 	elem = scx_stk_pop(stack);
-	asan_unpoison(elem, stack->data_size);
+	if (elem)
+		asan_unpoison(elem, stack->data_size);
+	else
+		arena_spin_unlock(stack->lock);
 
 	return (__u64)elem;
 }
 
 
-__hidden
+__weak
 __u64 scx_stk_alloc(struct scx_stk *stack)
 {
 	u64 elem;
@@ -388,9 +397,9 @@ __u64 scx_stk_alloc(struct scx_stk *stack)
 
 	elem = scx_stk_alloc_unlocked(stack);
 
-	arena_spin_unlock(stack->lock);
+	if (elem)
+		arena_spin_unlock(stack->lock);
 
 	return (u64)elem;
 }
 
-#pragma clang attribute pop

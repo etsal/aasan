@@ -20,7 +20,7 @@ typedef struct scx_buddy_header __arena scx_buddy_header_t;
 enum scx_buddy_consts {
 	SCX_BUDDY_MIN_ALLOC_SHIFT	= 4,
 	SCX_BUDDY_MIN_ALLOC_BYTES	= 1 << SCX_BUDDY_MIN_ALLOC_SHIFT,
-	SCX_BUDDY_CHUNK_MAX_ORDER	= 16,
+	SCX_BUDDY_CHUNK_MAX_ORDER	= 15,	/* Maximum _valid_ allocation order */
 	SCX_BUDDY_CHUNK_PAGES		= (SCX_BUDDY_MIN_ALLOC_BYTES << SCX_BUDDY_CHUNK_MAX_ORDER) / PAGE_SIZE,
 	SCX_BUDDY_CHUNK_ITEMS		= SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE / SCX_BUDDY_MIN_ALLOC_BYTES,
 	SCX_BUDDY_CHUNK_OFFSET_MASK	= (SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE) - 1,
@@ -45,7 +45,7 @@ struct scx_buddy_chunk {
 struct scx_buddy {
 	scx_buddy_chunk_t *first_chunk;		/* Pointer to the chunk linked list. */
 	size_t min_alloc_bytes;			/* Minimum allocation in bytes */
-	struct scx_stk stack;			/* Underlying stack page allocator. */
+	arena_spinlock_t __arena *lock;		/* Allocator lock */
 
 	/* XXXETSAL: Track used pages, used to drain the underlying page stack. */
 };

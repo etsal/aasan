@@ -32,8 +32,8 @@ int header_set_order(scx_buddy_chunk_t *chunk, u64 offset, u8 order)
 {
 	u8 prev_order;
 
-	if (order >= SCX_BUDDY_CHUNK_MAX_ORDER) {
-		bpf_printk("setting invalid order");
+	if (order > SCX_BUDDY_CHUNK_MAX_ORDER) {
+		bpf_printk("setting invalid order", order);
 		return -EINVAL;
 	}
 
@@ -65,7 +65,7 @@ u8 header_get_order(scx_buddy_chunk_t *chunk, u64 offset)
 {
 	u8 result;
 
-	_Static_assert(SCX_BUDDY_CHUNK_MAX_ORDER <= 16, "order must fit in 4 bits");
+	_Static_assert(SCX_BUDDY_CHUNK_MAX_ORDER < 16, "order must fit in 4 bits");
 
 	if (offset >= SCX_BUDDY_CHUNK_ITEMS) {
 		bpf_printk("setting order of invalid offset");
@@ -127,7 +127,7 @@ scx_buddy_header_t *chunk_get_header(scx_buddy_chunk_t *chunk, size_t idx)
 }
 
 static
-scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_stk *stk)
+scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy, bool locked)
 {
 	scx_buddy_header_t *header, *buddy_header;
 	u64 order, ord, last_order;
@@ -135,9 +135,16 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_stk *stk)
 	u32 idx, cur_idx;
 	int i, power2;
 	size_t left;
+	int ret;
 
-	chunk = (scx_buddy_chunk_t *)scx_stk_alloc_unlocked(stk);
+	if (locked)
+		arena_spin_unlock(buddy->lock);
+
+	chunk = bpf_arena_alloc_pages(&arena, NULL, SCX_BUDDY_CHUNK_PAGES, NUMA_NO_NODE, 0);
 	if (!chunk)
+		return NULL;
+
+	if (locked && (ret = arena_spin_lock(buddy->lock)))
 		return NULL;
 
 	/* Unpoison the chunk itself. */
@@ -155,11 +162,11 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_stk *stk)
 		header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 		header->next_index = SCX_BUDDY_CHUNK_ITEMS;
 		if (header_set_order(chunk, i, SCX_BUDDY_CHUNK_MAX_ORDER))
-			return NULL;
+			goto error;
 	}
 
 	_Static_assert(SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE >= SCX_BUDDY_MIN_ALLOC_BYTES * SCX_BUDDY_CHUNK_ITEMS,
-		"chunk must fit within the stack allocation");
+		"chunk must fit within the allocation");
 
 	/*
 	 * This reserves a chunk for the chunk metadata, then breaks
@@ -177,7 +184,7 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_stk *stk)
 		power2 = scx_ffs(left);
 		if (unlikely(power2 >= SCX_BUDDY_CHUNK_MAX_ORDER)) {
 			bpf_printk("buddy chunk metadata require allocation of order %d", power2);
-			return NULL;
+			goto error;
 		}
 
 		/* Round up allocations that are too small. */
@@ -201,7 +208,7 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_stk *stk)
 			/* Mark it free. */
 			chunk->order_indices[ord] = idx;
 			if (header_set_order(chunk, idx, ord))
-				return NULL;
+				goto error;
 		}
 
 		/* Adjust the index. */
@@ -209,25 +216,30 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_stk *stk)
 	}
 
 	return chunk;
+
+error:
+	if (locked)
+		arena_spin_unlock(buddy->lock);
+
+	return NULL;
 }
 
 static inline int
 scx_buddy_lock(struct scx_buddy *buddy)
 {
-	return arena_spin_lock(buddy->stack.lock);
+	return arena_spin_lock(buddy->lock);
 }
 
 static inline void
 scx_buddy_unlock(struct scx_buddy *buddy)
 {
-	arena_spin_unlock(buddy->stack.lock);
+	arena_spin_unlock(buddy->lock);
 }
 
 __hidden
 int scx_buddy_init(struct scx_buddy *buddy, size_t size, arena_spinlock_t __arg_arena __arena *lock)
 {
 	scx_buddy_chunk_t *chunk;
-	int ret;
 
 	/* Set a minimum allocation size. */
 	if (size < SCX_BUDDY_MIN_ALLOC_BYTES)
@@ -238,18 +250,12 @@ int scx_buddy_init(struct scx_buddy *buddy, size_t size, arena_spinlock_t __arg_
 		return -EALREADY;
 
 	buddy->min_alloc_bytes = size;
+	buddy->lock = lock;
 
 	_Static_assert(SCX_BUDDY_CHUNK_PAGES > 0, "chunk must use one or more pages");
 
-	/* One allocation per chunk. */
-	ret = scx_stk_init(&buddy->stack, lock, SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE, SCX_BUDDY_CHUNK_PAGES);
-	if (ret) {
-		buddy->min_alloc_bytes = 0;
-		return ret;
-	}
-
 	/* Chunk is already properly unpoisoned if allocated. */
-	chunk = scx_buddy_chunk_get(&buddy->stack);
+	chunk = scx_buddy_chunk_get(buddy, false);
 
 	if (chunk) {
 		/* Put the chunk at the beginning of the list. */
@@ -291,9 +297,6 @@ int scx_buddy_destroy(struct scx_buddy *buddy, size_t size)
 		bpf_arena_free_pages(&arena, chunk, SCX_BUDDY_CHUNK_PAGES);
 	}
 
-	/* Destroy the underlying stack allocator. */
-	scx_stk_destroy(&buddy->stack);
-
 	/* Clear all fields. */
 	buddy->first_chunk = NULL;
 	buddy->min_alloc_bytes = 0;
@@ -310,12 +313,12 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 	u32 idx, tmpidx;
 	u64 i;
 
-	bpf_for(order, order_req, SCX_BUDDY_CHUNK_MAX_ORDER) {
+	bpf_for(order, order_req, SCX_BUDDY_CHUNK_MAX_ORDER + 1) {
 		if (chunk->order_indices[order] != SCX_BUDDY_CHUNK_ITEMS)
 			break;
 	}
 
-	if (order == SCX_BUDDY_CHUNK_MAX_ORDER)
+	if (order > SCX_BUDDY_CHUNK_MAX_ORDER)
 		return (u64)NULL;
 
 	idx = chunk->order_indices[order];
@@ -374,7 +377,7 @@ u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size)
 		return (u64)NULL;
 
 	order = size_to_order(size);
-	if (order >= SCX_BUDDY_CHUNK_MAX_ORDER - 1) {
+	if (order > SCX_BUDDY_CHUNK_MAX_ORDER) {
 		bpf_printk("Allocation size %lu too large", size);
 		return (u64)NULL;
 	}
@@ -392,11 +395,9 @@ u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size)
 		goto done;
 
 	/* Get a new chunk. */
-	chunk = scx_buddy_chunk_get(&buddy->stack);
-	if (!chunk) {
-		scx_buddy_unlock(buddy);
+	chunk = scx_buddy_chunk_get(buddy, true);
+	if (!chunk)
 		return (u64)NULL;
-	}
 
 	/* Add the chunk into the allocator and retry. */
 	chunk->next = buddy->first_chunk;
@@ -461,7 +462,7 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 	asan_poison((u8 __arena *)addr, BUDDY_POISONED, SCX_BUDDY_MIN_ALLOC_BYTES << order);
 	asan_unpoison(header, sizeof(*header));
 
-	bpf_for(order, order, SCX_BUDDY_CHUNK_MAX_ORDER) {
+	bpf_for(order, order, SCX_BUDDY_CHUNK_MAX_ORDER + 1) {
 		buddy_idx = idx ^ (1 << order);
 		buddy_header = chunk_get_header(chunk, buddy_idx);
 

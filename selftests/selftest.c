@@ -10,8 +10,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <bpf/libbpf.h>
-#include <bpf/bpf.h>
+#include <libbpf.h>
+#include <bpf.h>
 
 #include <sys/resource.h>
 #include <sys/sysinfo.h>
@@ -352,11 +352,11 @@ selftest_asan(struct selftest *skel)
 	if (ret)
 		return ret;
 
-	printf("===START asan_test_static START===\n");
+	printf("===START asan_test START===\n");
 	prog_fd = bpf_program__fd(skel->progs.asan_test);
 	assert(prog_fd >= 0 && "no program found");
 	ret = selftest_fd(prog_fd);
-	printf("===END  asan_test_static  END===\n\n");
+	printf("===END  asan_test END===\n\n");
 
 	return ret;
 }
