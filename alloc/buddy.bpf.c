@@ -308,6 +308,7 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 	u64 address;
 	u64 order = 0;
 	u32 idx, tmpidx;
+	u64 i;
 
 	bpf_for(order, order_req, SCX_BUDDY_CHUNK_MAX_ORDER) {
 		if (chunk->order_indices[order] != SCX_BUDDY_CHUNK_ITEMS)
@@ -333,20 +334,20 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 	address = (u64)chunk_idx_to_mem(chunk, idx);
 
 	/* If we allocated from a larger-order chunk, split the buddies. */
-	bpf_for(order, order_req, order) {
+	bpf_for(i, order_req, order) {
 		/* Flip the bit for the current order. */
-		idx ^= 1 << order;
+		idx ^= 1 << i;
 
 		/* Add the buddy of the allocation to the free list. */
 		header = chunk_get_header(chunk, idx);
 		/* Unpoison the buddy header */
 		asan_unpoison(header, sizeof(*header));
 
-		if (header_set_order(chunk, idx, order))
+		if (header_set_order(chunk, idx, i))
 			return (u64)NULL;
 
 		/* Push the header to the beginning of the order_indices list. */
-		tmpidx = chunk->order_indices[order];
+		tmpidx = chunk->order_indices[i];
 
 		header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 		header->next_index = tmpidx;
@@ -356,7 +357,7 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 			tmp_header->prev_index = idx;
 		}
 
-		chunk->order_indices[order] = idx;
+		chunk->order_indices[i] = idx;
 	}
 
 	return address;
