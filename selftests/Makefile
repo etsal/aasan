@@ -1,14 +1,15 @@
 .PHONY: clean test
 
+BASEDIR=$(HOME)/asan
 KERNEL=$(HOME)/linux
 
 BPF_SOURCES = $(wildcard *.bpf.c) $(wildcard ../lib/*.bpf.c) $(wildcard ../alloc/*.bpf.c)
 BPF_OBJECTS = $(notdir $(BPF_SOURCES:.bpf.c=.bpf.o))
 vpath %.bpf.c ../alloc ../lib .
 
-BPFTOOL=$(KERNEL)/tools/bpf/bpftool/bpftool
+BPFTOOL=$(BASEDIR)/bpftool/src/bpftool
 
-INCLUDES=-I../include -I$(KERNEL)/tools/lib -I../include/arch -I ../include/arch/bpf-compat
+INCLUDES=-I../include -I$(BASEDIR)/bpftool/libbpf/src -I../include/arch -I ../include/arch/bpf-compat
 
 BPF_CFLAGS=--target=bpf -g -O2 -D__TARGET_ARCH_x86 -mcpu=v3 -mlittle-endian
 BPF_CFLAGS+=-Wall -Wno-compare-distinct-pointer-types -Wno-incompatible-pointer-types-discards-qualifiers
@@ -22,14 +23,14 @@ BPF_LLVM_FLAGS+= -mllvm -asan-destructor-kind=none
 
 BPF_FLAGS=$(BPF_CFLAGS) $(BPF_ASAN_FLAGS) $(BPF_LLVM_FLAGS)
 
-BPF_CFLAGS+=-I../vmlinux -I$(KERNEL)/tools/lib -I/usr/include/$(shell uname -m)-linux-gnu 
+BPF_CFLAGS+=-I../vmlinux -I/usr/include/$(shell uname -m)-linux-gnu 
 BPF_CFLAGS+=$(INCLUDES)
 
-LIBBPF_DIR=$(KERNEL)/tools/lib/bpf
+LIBBPF_DIR=$(BASEDIR)/bpftool/libbpf/src
 LIBBPF_A=$(LIBBPF_DIR)/libbpf.a
 CFLAGS=-O2 -no-pie
 CFLAGS+=$(INCLUDES) 
-CFLAGS+=-I$(LIBBPF_DIR)/include
+CFLAGS+=-I$(LIBBPF_DIR)
 LDFLAGS=$(LIBBPF_A) -lelf -lz -lzstd
 
 test: selftest
