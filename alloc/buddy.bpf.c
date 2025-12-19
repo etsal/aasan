@@ -34,13 +34,13 @@ int header_set_order(scx_buddy_chunk_t *chunk, u64 offset, u8 order)
 	u8 prev_order;
 
 	if (order > SCX_BUDDY_CHUNK_MAX_ORDER) {
-		bpf_printk("setting invalid order", order);
+		arena_stderr("setting invalid order", order);
 		arena_bug_trigger(__func__, __LINE__);
 		return -EINVAL;
 	}
 
 	if (offset >= SCX_BUDDY_CHUNK_ITEMS) {
-		bpf_printk("setting order of invalid offset (%d, max %d)", offset, SCX_BUDDY_CHUNK_ITEMS);
+		arena_stderr("setting order of invalid offset (%d, max %d)", offset, SCX_BUDDY_CHUNK_ITEMS);
 		return -EINVAL;
 	}
 
@@ -70,7 +70,7 @@ u8 header_get_order(scx_buddy_chunk_t *chunk, u64 offset)
 	_Static_assert(SCX_BUDDY_CHUNK_MAX_ORDER < 16, "order must fit in 4 bits");
 
 	if (offset >= SCX_BUDDY_CHUNK_ITEMS) {
-		bpf_printk("setting order of invalid offset");
+		arena_stderr("setting order of invalid offset");
 		return SCX_BUDDY_CHUNK_MAX_ORDER;
 	}
 
@@ -85,7 +85,7 @@ u64 size_to_order(size_t size)
 	u64 order;
 
 	if (unlikely(!size)) {
-		bpf_printk("size 0 has no order");
+		arena_stderr("size 0 has no order");
 		return 64;
 	}
 
@@ -184,7 +184,7 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy, bool locked)
 	while(left && can_loop) {
 		power2 = scx_ffs(left);
 		if (unlikely(power2 >= SCX_BUDDY_CHUNK_MAX_ORDER)) {
-			bpf_printk("buddy chunk metadata require allocation of order %d", power2);
+			arena_stderr("buddy chunk metadata require allocation of order %d", power2);
 			goto error;
 		}
 
@@ -382,7 +382,7 @@ u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size)
 
 	order = size_to_order(size);
 	if (order > SCX_BUDDY_CHUNK_MAX_ORDER) {
-		bpf_printk("Allocation size %lu too large", size);
+		arena_stderr("Allocation size %lu too large", size);
 		return (u64)NULL;
 	}
 
@@ -444,7 +444,7 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 		return -EINVAL;
 
 	if (addr & (SCX_BUDDY_MIN_ALLOC_BYTES - 1)) {
-		bpf_printk("Freeing unaligned address %llx", addr);
+		arena_stderr("Freeing unaligned address %llx", addr);
 		return 0;
 	}
 
