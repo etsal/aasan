@@ -34,13 +34,14 @@ int header_set_order(scx_buddy_chunk_t *chunk, u64 offset, u8 order)
 	u8 prev_order;
 
 	if (order > SCX_BUDDY_CHUNK_MAX_ORDER) {
-		arena_stderr("setting invalid order", order);
+		arena_stderr("setting invalid order\n", order);
 		arena_bug_trigger(__func__, __LINE__);
 		return -EINVAL;
 	}
 
 	if (offset >= SCX_BUDDY_CHUNK_ITEMS) {
-		arena_stderr("setting order of invalid offset (%d, max %d)", offset, SCX_BUDDY_CHUNK_ITEMS);
+		arena_stderr("setting order of invalid offset (%d, max %d)\n", offset, SCX_BUDDY_CHUNK_ITEMS);
+		arena_bug_trigger(__func__, __LINE__);
 		return -EINVAL;
 	}
 
@@ -70,7 +71,7 @@ u8 header_get_order(scx_buddy_chunk_t *chunk, u64 offset)
 	_Static_assert(SCX_BUDDY_CHUNK_MAX_ORDER < 16, "order must fit in 4 bits");
 
 	if (offset >= SCX_BUDDY_CHUNK_ITEMS) {
-		arena_stderr("setting order of invalid offset");
+		arena_stderr("setting order of invalid offset\n");
 		return SCX_BUDDY_CHUNK_MAX_ORDER;
 	}
 
@@ -85,7 +86,7 @@ u64 size_to_order(size_t size)
 	u64 order;
 
 	if (unlikely(!size)) {
-		arena_stderr("size 0 has no order");
+		arena_stderr("size 0 has no order\n");
 		return 64;
 	}
 
@@ -184,7 +185,7 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy, bool locked)
 	while(left && can_loop) {
 		power2 = scx_ffs(left);
 		if (unlikely(power2 >= SCX_BUDDY_CHUNK_MAX_ORDER)) {
-			arena_stderr("buddy chunk metadata require allocation of order %d", power2);
+			arena_stderr("buddy chunk metadata require allocation of order %d\n", power2);
 			goto error;
 		}
 
@@ -207,6 +208,7 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy, bool locked)
 			asan_unpoison(buddy_header, sizeof(*buddy_header));
 
 			/* Mark it free. */
+			arena_stdout("setting idx %lx to ord [%d]\n", idx, ord);
 			chunk->order_indices[ord] = idx;
 			if (header_set_order(chunk, idx, ord))
 				goto error;
@@ -322,15 +324,18 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 	if (order > SCX_BUDDY_CHUNK_MAX_ORDER)
 		return (u64)NULL;
 
-	if (!chunk)
-		bpf_stream_printk(2, "Invalid zero chunk");
 
 	idx = chunk->order_indices[order];
+	if (idx > chunk->order_indices[order]) {
+		arena_stdout("impossible index %lx", idx);
+	}
 	header = chunk_get_header(chunk, idx);
 	chunk->order_indices[order] = header->next_index;
+	arena_stdout("setting order indices to %lx->%lx\n", idx, header->next_index);
 
 	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 	header->next_index = SCX_BUDDY_CHUNK_ITEMS;
+	arena_stderr("%s:%d %u %d\n", __func__, __LINE__, idx, idx);
 	if (header_set_order(chunk, idx, order_req))
 		return (u64)NULL;
 
@@ -377,30 +382,25 @@ u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size)
 	u64 address;
 	int order;
 
+	arena_stdout("allocation request of size %ld\n", size);
+
 	if (!buddy)
 		return (u64)NULL;
 
 	order = size_to_order(size);
-	if (order > SCX_BUDDY_CHUNK_MAX_ORDER) {
-		arena_stderr("Allocation size %lu too large", size);
+	if (order > SCX_BUDDY_CHUNK_MAX_ORDER || order < 0) {
+		arena_stderr("invalid order %d (sz %lu)\n", order, size);
 		return (u64)NULL;
 	}
 
 	if (scx_buddy_lock(buddy))
 		return (u64)NULL;
 
-	chunk = buddy->first_chunk;
-	address = 0ULL;
-	do {
-		if (!chunk)
-			break;
-
+	for (chunk = buddy->first_chunk; chunk != NULL && can_loop; chunk = chunk->next) {
 		address = scx_buddy_chunk_alloc(chunk, order);
-		chunk = chunk->next;
-	} while (address == (u64)NULL && can_loop);
-
-	if (address)
-		goto done;
+		if (address)
+			goto done;
+	}
 
 	/* Get a new chunk. */
 	chunk = scx_buddy_chunk_get(buddy, true);
@@ -444,7 +444,7 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 		return -EINVAL;
 
 	if (addr & (SCX_BUDDY_MIN_ALLOC_BYTES - 1)) {
-		arena_stderr("Freeing unaligned address %llx", addr);
+		arena_stderr("Freeing unaligned address %llx\n", addr);
 		return 0;
 	}
 

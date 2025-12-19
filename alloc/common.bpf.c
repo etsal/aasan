@@ -23,9 +23,12 @@ __weak __hidden int
 arena_bug_trigger(const char *func, const int line)
 {
 	volatile u8 __arena *nullptr = (u8 __arena *)0ULL;
-	arena_stdout("[BUG] %s:%d\n", func, line);
 
 	*nullptr = 0;
 
 	return 0;
 }
+
+/* XXX Assert */
+
+/* XXX Message/trigger combo macro */
