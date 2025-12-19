@@ -38,6 +38,12 @@ struct scx_buddy_header {
 struct scx_buddy_chunk {
 	/* The order of the current allocation for a item. 4 bits per order. */
 	u8			orders[SCX_BUDDY_CHUNK_ITEMS / 2];
+	/* 
+	 * Bit to denote whether chunk is allocated. Size of the allocated/free
+	 * chunk found from the orders array.
+	 */
+	u8			allocated[SCX_BUDDY_CHUNK_ITEMS / 8];
+	/* Freelists for O(1) allocation. */
 	u64			order_freelists[SCX_BUDDY_CHUNK_NUM_ORDERS];
 	scx_buddy_chunk_t	*prev;
 	scx_buddy_chunk_t	*next;
