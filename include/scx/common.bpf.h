@@ -288,6 +288,43 @@ int scx_ffs(__u64 word)
 	return num;
 }
 
+static inline
+int scx_fls(__u64 word)
+{
+	unsigned int num = 0;
+
+	if (word & 0xffffffff00000000ULL) {
+		num += 32;
+		word >>= 32;
+	}
+
+	if (word & 0xffff0000) {
+		num += 16;
+		word >>= 16;
+	}
+
+	if (word & 0xff00) {
+		num += 8;
+		word >>= 8;
+	}
+
+	if (word & 0xf0) {
+		num += 4;
+		word >>= 4;
+	}
+
+	if (word & 0xc) {
+		num += 2;
+		word >>= 2;
+	}
+
+	if (word & 0x2) {
+		num += 1;
+	}
+
+	return num;
+}
+
 #ifndef div_round_up
 #define div_round_up(a, b) (((a) + (b) - 1) / (b))
 #endif

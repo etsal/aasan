@@ -20,10 +20,11 @@ typedef struct scx_buddy_header __arena scx_buddy_header_t;
 enum scx_buddy_consts {
 	SCX_BUDDY_MIN_ALLOC_SHIFT	= 4,
 	SCX_BUDDY_MIN_ALLOC_BYTES	= 1 << SCX_BUDDY_MIN_ALLOC_SHIFT,
-	SCX_BUDDY_CHUNK_MAX_ORDER	= 15,	/* Maximum _valid_ allocation order */
-	SCX_BUDDY_CHUNK_PAGES		= (SCX_BUDDY_MIN_ALLOC_BYTES << SCX_BUDDY_CHUNK_MAX_ORDER) / PAGE_SIZE,
-	SCX_BUDDY_CHUNK_ITEMS		= SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE / SCX_BUDDY_MIN_ALLOC_BYTES,
-	SCX_BUDDY_CHUNK_OFFSET_MASK	= (SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE) - 1,
+	SCX_BUDDY_CHUNK_NUM_ORDERS	= 1 << 4,	/* 4 bits per order */
+	SCX_BUDDY_CHUNK_BYTES		= SCX_BUDDY_MIN_ALLOC_BYTES << SCX_BUDDY_CHUNK_NUM_ORDERS,
+	SCX_BUDDY_CHUNK_PAGES		= SCX_BUDDY_CHUNK_BYTES / PAGE_SIZE,
+	SCX_BUDDY_CHUNK_ITEMS		= SCX_BUDDY_CHUNK_BYTES / SCX_BUDDY_MIN_ALLOC_BYTES,
+	SCX_BUDDY_CHUNK_OFFSET_MASK	= SCX_BUDDY_CHUNK_BYTES - 1,
 };
 
 struct scx_buddy_header {
@@ -37,7 +38,7 @@ struct scx_buddy_header {
 struct scx_buddy_chunk {
 	/* The order of the current allocation for a item. 4 bits per order. */
 	u8			orders[SCX_BUDDY_CHUNK_ITEMS / 2];
-	u64			order_indices[SCX_BUDDY_CHUNK_MAX_ORDER];
+	u64			order_freelists[SCX_BUDDY_CHUNK_NUM_ORDERS];
 	scx_buddy_chunk_t	*prev;
 	scx_buddy_chunk_t	*next;
 };
