@@ -619,7 +619,6 @@ int asan_test_buddy(void)
 		return ret;
 	}
 
-	/*
 	ret = asan_test_buddy_uaf();
 	if (ret) {
 		bpf_printk("%s:%d UAF test failed", __func__, __LINE__);
@@ -631,7 +630,6 @@ int asan_test_buddy(void)
 		bpf_printk("%s:%d blob test failed", __func__, __LINE__);
 		return ret;
 	}
-	*/
 
 	return 0;
 }
