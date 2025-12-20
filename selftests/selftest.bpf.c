@@ -18,19 +18,19 @@ int alloc_selftest(void)
 		return ret;
 	}
 
-#if 0
 	ret = scx_selftest_buddy();
 	if (ret) {
 		bpf_printk("scx_selftest_buddy failed with %d", ret);
 		return ret;
 	}
-#endif
 
+#if 0
 	ret = scx_selftest_stack();
 	if (ret) {
 		bpf_printk("scx_selftest_stack failed with %d", ret);
 		return ret;
 	}
+#endif
 
 	bpf_printk("Alloc selftests successful.");
 

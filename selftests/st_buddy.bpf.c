@@ -7,30 +7,84 @@
 #include <scx/common.bpf.h>
 #include <lib/sdt_task.h>
 
+#include <alloc/buddy.h>
+
 #include "selftest.h"
+
+private(ST_BUDDY) struct scx_buddy st_buddy;
+u64 __arena st_buddy_lock;
 
 static
 int scx_selftest_buddy_create()
 {
-	return -EOPNOTSUPP;
+	const int iters = 10;
+	int ret, i;
+
+	for (i = 0; i < iters && can_loop; i++) {
+		ret = scx_buddy_init(&st_buddy, SCX_BUDDY_MIN_ALLOC_BYTES,
+				     (arena_spinlock_t __arena *)&st_buddy_lock);
+		if (ret)
+			return ret;
+
+		ret = scx_buddy_destroy(&st_buddy, 0);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
 static
 int scx_selftest_buddy_alloc()
 {
-	return -EOPNOTSUPP;
-}
+	size_t sizes[] = { 3, 17, 64, 129, 256, 333, 512, 517 };
+	void __arena *mem;
+	int ret, i;
 
-static
-int scx_selftest_buddy_free()
-{
-	return -EOPNOTSUPP;
+	for (i = 0; i < 8 && can_loop; i++) {
+		ret = scx_buddy_init(&st_buddy, SCX_BUDDY_MIN_ALLOC_BYTES,
+				     (arena_spinlock_t __arena *)&st_buddy_lock);
+		if (ret)
+			return ret;
+
+		mem = scx_buddy_alloc(&st_buddy, sizes[i]);
+		if (!mem) {
+			scx_buddy_destroy(&st_buddy, 0);
+			return -ENOMEM;
+		}
+
+		scx_buddy_destroy(&st_buddy, 0);
+	}
+
+	return 0;
 }
 
 static
 int scx_selftest_buddy_alloc_free()
 {
-	return -EOPNOTSUPP;
+	size_t sizes[] = { 3, 17, 64, 129, 256, 333, 512, 517 };
+	const int iters = 800;
+	void __arena *mem;
+	int ret, i;
+
+	ret = scx_buddy_init(&st_buddy, SCX_BUDDY_MIN_ALLOC_BYTES,
+			     (arena_spinlock_t __arena *)&st_buddy_lock);
+	if (ret)
+		return ret;
+
+	bpf_for(i, 0, iters) {
+		mem = scx_buddy_alloc(&st_buddy, sizes[(i * 5) % 8]);
+		if (!mem) {
+			scx_buddy_destroy(&st_buddy, 0);
+			return -ENOMEM;
+		}
+
+		scx_buddy_free(&st_buddy, mem);
+	}
+
+	scx_buddy_destroy(&st_buddy, 0);
+
+	return 0;
 }
 
 static
@@ -58,7 +112,6 @@ int scx_selftest_buddy(void)
 {
 	SCX_BUDDY_SELFTEST(create);
 	SCX_BUDDY_SELFTEST(alloc);
-	SCX_BUDDY_SELFTEST(free);
 	SCX_BUDDY_SELFTEST(alloc_free);
 	SCX_BUDDY_SELFTEST(alloc_multiple);
 	SCX_BUDDY_SELFTEST(fragmentation);
