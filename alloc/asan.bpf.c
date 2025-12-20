@@ -3,6 +3,7 @@
 
 #include <lib/arena_map.h>
 #include <alloc/asan.h>
+#include <alloc/common.h>
 
 #pragma clang attribute push(__attribute__((no_sanitize("address"))), apply_to=function)
 
@@ -451,7 +452,7 @@ int asan_init(void)
 	shadowmap = (u64)bpf_arena_alloc_pages(&arena, (void __arena *)ASAN_SHADOW_OFFSET, 
 		ASAN_SHADOW_SIZE >> PAGE_SHIFT, NUMA_NO_NODE, 0);
 	if (!shadowmap) {
-		bpf_printk("Could not allocate shadow map");
+		arena_stderr("Could not allocate shadow map\n");
 		return -ENOMEM;
 	}
 

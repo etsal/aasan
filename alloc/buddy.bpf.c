@@ -157,6 +157,7 @@ static
 scx_buddy_header_t *chunk_get_header(scx_buddy_chunk_t *chunk, size_t idx)
 {
 	bool allocated;
+	u64 address;
 
 	if (idx_is_allocated(chunk, idx, &allocated)) {
 		arena_stderr("accessing invalid idx 0x%lx", idx);
@@ -168,7 +169,27 @@ scx_buddy_header_t *chunk_get_header(scx_buddy_chunk_t *chunk, size_t idx)
 		return NULL;
 	}
 
-	return (scx_buddy_header_t *)idx_to_addr(chunk, idx);
+	address = (u64)idx_to_addr(chunk, idx);
+
+	/* 
+	 * Offset the header within the block. This avoids accidental overwrites
+	 * to the header because of off-by-one errors when using adjacent blocks.
+	 *
+	 * The offset has been chosen as a compromise between ASAN effectiveness
+	 * and allocator granularity:
+	 * 1) ASAN dictates valid data runs are 8-byte aligned.
+	 * 2) We want to keep a low minimum allocation size (currently 16).
+	 * 
+	 * As a result, we have only two possible positions for the header: Bytes
+	 * 0 and 8. Keeping the header in byte 0 means off-by-ones from the previous
+	 * block touch the header, and, since the header must be accessible, ASAN
+	 * will not trigger. Keeping the header on byte 8 means off-by-one errors from
+	 * the previous block are caught by ASAN. Negative offsets are rarer, so 
+	 * while accesses into the block from the next block are possible, they are
+	 * less probable.
+	 */
+
+	return (scx_buddy_header_t *)(address + SCX_BUDDY_HEADER_OFF);
 }
 
 static
@@ -522,10 +543,10 @@ done:
 	 * data is smaller than the header, we must poison any
 	 * unused bytes that were part of the header.
 	 */
-	if (size < sizeof(scx_buddy_header_t))
-		asan_poison((u8 __arena *)address + size, BUDDY_POISONED, sizeof(scx_buddy_header_t) - size);
-	else
-		asan_unpoison((u8 __arena *)address + sizeof(scx_buddy_header_t), size - sizeof(scx_buddy_header_t));
+	if (size < SCX_BUDDY_HEADER_OFF + sizeof(scx_buddy_header_t))
+		asan_poison((u8 __arena *)address + SCX_BUDDY_HEADER_OFF, BUDDY_POISONED, sizeof(scx_buddy_header_t));
+
+	asan_unpoison((u8 __arena *)address, size);
 
 	scx_buddy_unlock(buddy);
 
@@ -619,9 +640,9 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 		header = chunk_get_header(chunk, idx);
 
 		/*
-		 * order + 1 guaranteed to be < SCX_BUDDY_NUM_ORDERS because the
+		 * order + 1 guaranteed to be < SCX_BUDDY_CHUNK_NUM_ORDERS because the
 		 * the chunk metadata is always allocated and prevent the chunk
-		 * from having 1 << SCX_BUDDY_NUM_ORDERS contiguous items.
+		 * from having 1 << SCX_BUDDY_CHUNK_NUM_ORDERS contiguous items.
 		 */
 		if (idx_set_order(chunk, idx, order + 1))
 			return 0;
