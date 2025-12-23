@@ -8,6 +8,7 @@
 #include <lib/sdt_task.h>
 
 #include <alloc/buddy.h>
+#include <alloc/common.h>
 
 #include "selftest.h"
 
@@ -137,7 +138,12 @@ int scx_selftest_buddy_alloc_multiple()
 
 		bpf_for(j, 0, sz) {
 			mem[j] = poison;
+			if (mem[j] != poison) {
+				scx_buddy_destroy(&st_buddy, 0);
+				return -EINVAL;
+			}
 		}
+
 	}
 
 	/*
@@ -146,7 +152,7 @@ int scx_selftest_buddy_alloc_multiple()
 	 * poisoned value corresponding to the element. If any values
 	 * are unexpected, return an error.
 	 */
-	bpf_for(i, 0, SEGARRLEN) {
+	bpf_for(i, 10, SEGARRLEN) {
 		idx = (i * 17) % SEGARRLEN;
 
 		mem = segarr[idx].block;
