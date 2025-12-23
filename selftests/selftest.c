@@ -433,7 +433,7 @@ int main(int argc, char *argv[])
 	}
 
 	run_test(selftest_alloc);
-//	run_test(selftest_asan);
+	run_test(selftest_asan);
 
 	return 0;
 }
