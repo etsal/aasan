@@ -31,9 +31,8 @@ u64 scx_next_pow2(__u64 n)
 static
 int idx_set_allocated(scx_buddy_chunk_t *chunk, u64 idx, bool allocated)
 {
-	if (idx >= SCX_BUDDY_CHUNK_ITEMS) {
+	if (unlikely(idx >= SCX_BUDDY_CHUNK_ITEMS)) {
 		arena_stderr("setting order of invalid idx (%d, max %d)\n", idx, SCX_BUDDY_CHUNK_ITEMS);
-		arena_bug_trigger(__func__, __LINE__);
 		return -EINVAL;
 	}
 
@@ -48,9 +47,8 @@ int idx_set_allocated(scx_buddy_chunk_t *chunk, u64 idx, bool allocated)
 static
 int idx_is_allocated(scx_buddy_chunk_t *chunk, u64 idx, bool *allocated)
 {
-	if (idx >= SCX_BUDDY_CHUNK_ITEMS) {
+	if (unlikely(idx >= SCX_BUDDY_CHUNK_ITEMS)) {
 		arena_stderr("setting order of invalid idx (%d, max %d)\n", idx, SCX_BUDDY_CHUNK_ITEMS);
-		arena_bug_trigger(__func__, __LINE__);
 		return -EINVAL;
 	}
 
@@ -64,15 +62,13 @@ int idx_set_order(scx_buddy_chunk_t *chunk, u64 idx, u8 order)
 {
 	u8 prev_order;
 
-	if (order >= SCX_BUDDY_CHUNK_NUM_ORDERS) {
+	if (unlikely(order >= SCX_BUDDY_CHUNK_NUM_ORDERS)) {
 		arena_stderr("setting invalid order %u\n", order);
-		arena_bug_trigger(__func__, __LINE__);
 		return -EINVAL;
 	}
 
-	if (idx >= SCX_BUDDY_CHUNK_ITEMS) {
+	if (unlikely(idx >= SCX_BUDDY_CHUNK_ITEMS)) {
 		arena_stderr("setting order of invalid idx (%d, max %d)\n", idx, SCX_BUDDY_CHUNK_ITEMS);
-		arena_bug_trigger(__func__, __LINE__);
 		return -EINVAL;
 	}
 
@@ -101,7 +97,7 @@ u8 idx_get_order(scx_buddy_chunk_t *chunk, u64 idx)
 
 	_Static_assert(SCX_BUDDY_CHUNK_NUM_ORDERS <= 16, "order must fit in 4 bits");
 
-	if (idx >= SCX_BUDDY_CHUNK_ITEMS) {
+	if (unlikely(idx >= SCX_BUDDY_CHUNK_ITEMS)) {
 		arena_stderr("setting order of invalid idx\n");
 		return SCX_BUDDY_CHUNK_NUM_ORDERS;
 	}
@@ -115,6 +111,11 @@ static
 void __arena *idx_to_addr(scx_buddy_chunk_t *chunk, size_t idx)
 {
 	u64 address;
+
+	if (unlikely(idx >= SCX_BUDDY_CHUNK_ITEMS)) {
+		arena_stderr("setting order of invalid idx\n");
+		return NULL;
+	}
 
 	/*
 	 * The data blocks start in the chunk after the metadata block.
@@ -136,12 +137,12 @@ scx_buddy_header_t *idx_to_header(scx_buddy_chunk_t *chunk, size_t idx)
 	bool allocated;
 	u64 address;
 
-	if (idx_is_allocated(chunk, idx, &allocated)) {
+	if (unlikely(idx_is_allocated(chunk, idx, &allocated))) {
 		arena_stderr("accessing invalid idx 0x%lx", idx);
 		return NULL;
 	}
 
-	if (allocated) {
+	if (unlikely(allocated)) {
 		arena_stderr("accessing allocated idx 0x%lx as header", idx);
 		return NULL;
 	}
@@ -175,6 +176,8 @@ int idx_mark_free(scx_buddy_chunk_t *chunk, size_t idx, u8 ord)
 	scx_buddy_header_t *header;
 
 	header = idx_to_header(chunk, idx);
+	if (unlikely(!header))
+		return -EINVAL;
 
 	asan_unpoison(header, sizeof(*header));
 
@@ -208,14 +211,9 @@ int header_to_idx(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u64 *idx
 }
 
 static
-int header_add_freelist(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u8 order)
+void header_add_freelist(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u64 idx, u8 order)
 {
 	scx_buddy_header_t *tmp_header;
-	u64 idx;
-	int ret;
-
-	if ((ret = header_to_idx(chunk, header, &idx)))
-		return ret;
 
 	header->next_index = chunk->order_freelists[order];
 	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
@@ -226,8 +224,6 @@ int header_add_freelist(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u8
 	}
 
 	chunk->order_freelists[order] = idx;
-
-	return 0;
 }
 
 static
@@ -705,7 +701,7 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 	}
 
 	order = idx_get_order(chunk, idx);
-	header_add_freelist(chunk, header, order);
+	header_add_freelist(chunk, header, idx, order);
 
 	return 0;
 }
