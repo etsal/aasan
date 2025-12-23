@@ -632,13 +632,13 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 		return 0;
 	}
 
-	/* Align to the chunk boundary. */
+	/* Get (chunk, idx) out of the address. */
 	chunk = (void __arena *)(addr & ~SCX_BUDDY_CHUNK_OFFSET_MASK);
-
-	/* Get the page idx. */
 	idx = (addr & SCX_BUDDY_CHUNK_OFFSET_MASK) / SCX_BUDDY_MIN_ALLOC_BYTES;
 
+	/* Mark the block as unallocated so we can access the header. */
 	idx_set_allocated(chunk, idx, false);
+
 	order = idx_get_order(chunk, idx);
 	header = idx_to_header(chunk, idx);
 
@@ -646,6 +646,11 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 	asan_poison((u8 __arena *)addr, BUDDY_POISONED, SCX_BUDDY_MIN_ALLOC_BYTES << order);
 	asan_unpoison(header, sizeof(*header));
 
+	/* 
+	 * Coalescing loop. Merge with free buddies of equal order.
+	 * For every coalescing step, keep the left buddy and 
+	 * drop the right buddy's header.
+	 */
 	bpf_for(order, order, SCX_BUDDY_CHUNK_NUM_ORDERS) {
 		buddy_idx = idx ^ (1 << order);
 
@@ -661,33 +666,25 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 		if (idx_get_order(chunk, buddy_idx) != order)
 			break;
 
-
 		buddy_header = idx_to_header(chunk, buddy_idx);
 		header_remove_freelist(chunk, buddy_header, order);
-		/* Unused headers have no valid order, so do not set it for the buddy. */
 
-		/* Keep the "left" header out of the two buddies. */
+		/* Keep the left header out of the two buddies, drop the other one. */
 		if (buddy_idx < idx) {
 			tmp_idx = idx;
 			idx = buddy_idx;
 			buddy_idx = tmp_idx;
 		}
 
+		/* Remove the buddy from the freelists so that we can merge it. */
 		buddy_header = idx_to_header(chunk, buddy_idx);
 		asan_poison(buddy_header, BUDDY_POISONED, sizeof(*buddy_header));
-
-		/*
-		 * order + 1 guaranteed to be < SCX_BUDDY_CHUNK_NUM_ORDERS because the
-		 * the chunk metadata is always allocated and prevent the chunk
-		 * from having 1 << SCX_BUDDY_CHUNK_NUM_ORDERS contiguous items.
-		 */
-		if (idx_set_order(chunk, idx, order + 1))
-			return 0;
-
-		header = idx_to_header(chunk, idx);
 	}
 
-	order = idx_get_order(chunk, idx);
+	/* Header properly freed but not in any freelists yet .*/
+	idx_set_order(chunk, idx, order);
+
+	header = idx_to_header(chunk, idx);
 	header_add_freelist(chunk, header, idx, order);
 
 	return 0;
