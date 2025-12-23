@@ -170,6 +170,27 @@ scx_buddy_header_t *idx_get_header(scx_buddy_chunk_t *chunk, size_t idx)
 }
 
 static
+int idx_mark_free(scx_buddy_chunk_t *chunk, size_t idx, size_t ord)
+{
+	scx_buddy_header_t *header;
+
+	header = idx_get_header(chunk, idx);
+
+	asan_unpoison(header, sizeof(*header));
+
+	idx_set_allocated(chunk, idx, false);
+
+	/* Add to the freelists. */
+	header->next_index = SCX_BUDDY_CHUNK_ITEMS;
+	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
+
+	/* Mark it free. */
+	chunk->order_freelists[ord] = idx;
+
+	return idx_set_order(chunk, idx, ord);
+}
+
+static
 u64 size_to_order(size_t size)
 {
 	u64 order;
@@ -195,7 +216,6 @@ u64 size_to_order(size_t size)
 static
 scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy, bool locked)
 {
-	scx_buddy_header_t *buddy_header;
 	u64 order, ord, min_order, max_order;
 	scx_buddy_chunk_t *chunk;
 	u32 idx, cur_idx;
@@ -310,18 +330,10 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy, bool locked)
 		 */
 		min_order = left ? order + 1 : order;
 		bpf_for (ord, min_order, max_order) {
+			/* Mark the buddy as free and add it to the freelists. */
 			idx = cur_idx + (1 << ord);
 
-			/* Mark it as unpoisoned. */
-			buddy_header = idx_get_header(chunk, idx);
-			asan_unpoison(buddy_header, sizeof(*buddy_header));
-			idx_set_allocated(chunk, idx, false);
-			buddy_header->next_index = SCX_BUDDY_CHUNK_ITEMS;
-			buddy_header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
-
-			/* Mark it free. */
-			chunk->order_freelists[ord] = idx;
-			if (idx_set_order(chunk, idx, ord))
+			if (idx_mark_free(chunk, idx, ord))
 				goto error;
 		}
 
