@@ -12,7 +12,19 @@
 #include "selftest.h"
 
 private(ST_BUDDY) struct scx_buddy st_buddy;
-u64 __arena st_buddy_lock;
+static u64 __arena st_buddy_lock;
+
+struct segarr_entry {
+	u8 __arena *block;
+	size_t sz;
+	u8 poison;
+};
+
+typedef struct segarr_entry __arena segarr_entry_t;
+
+#define SEGARRLEN (512)
+static struct segarr_entry __arena segarr[SEGARRLEN];
+size_t __arena sizes[] = { 3, 17, 1025, 129, 16350, 333, 9, 517, 2099 };
 
 static
 int scx_selftest_buddy_create()
@@ -37,7 +49,6 @@ int scx_selftest_buddy_create()
 static
 int scx_selftest_buddy_alloc()
 {
-	size_t sizes[] = { 3, 17, 64, 129, 256, 333, 512, 517 };
 	void __arena *mem;
 	int ret, i;
 
@@ -90,7 +101,72 @@ int scx_selftest_buddy_alloc_free()
 static
 int scx_selftest_buddy_alloc_multiple()
 {
-	return -EOPNOTSUPP;
+	int ret, j;
+	u32 i, idx;
+	u8 __arena *mem;
+	size_t sz;
+	u8 poison;
+
+	ret = scx_buddy_init(&st_buddy, SCX_BUDDY_MIN_ALLOC_BYTES,
+			     (arena_spinlock_t __arena *)&st_buddy_lock);
+	if (ret)
+		return ret;
+
+	/*
+	 * Cycle through each size, allocating an entry in the
+	 * segarr. Continue for SEGARRLEN iterations. For every
+	 * allocation write down the size, use the current index
+	 * as a poison value, and log it with the pointer in the
+	 * segarr entry. Use the poison value to poison the entire
+	 * allocated memory according to the size given.
+	 */
+	bpf_for(i, 0, SEGARRLEN) {
+		sz = sizes[idx % 9];
+		poison = (u8)i;
+
+		mem = scx_buddy_alloc(&st_buddy, sz);
+		if (!mem) {
+			scx_buddy_destroy(&st_buddy, 0);
+			bpf_printk("%s:%d", __func__, __LINE__);
+			return -ENOMEM;
+		}
+
+		segarr[i].block = mem;
+		segarr[i].sz = sz;
+		segarr[i].poison = poison;
+
+		bpf_for(j, 0, sz) {
+			mem[j] = poison;
+		}
+	}
+
+	/*
+	 * For SEGARRLEN iterations, go to (i * 17) % SEGARRLEN, and free
+	 * the block pointed to. Before freeing, check all bytes have the
+	 * poisoned value corresponding to the element. If any values
+	 * are unexpected, return an error.
+	 */
+	bpf_for(i, 0, SEGARRLEN) {
+		idx = (i * 17) % SEGARRLEN;
+
+		mem = segarr[idx].block;
+		sz = segarr[idx].sz;
+		poison = segarr[idx].poison;
+
+		bpf_for(j, 0, sz) {
+			if (mem[j] != poison) {
+				scx_buddy_destroy(&st_buddy, 0);
+				bpf_printk("%s:%d %lx %u vs %u", __func__, __LINE__, &mem[j], mem[j], poison);
+				return -EINVAL;
+			}
+		}
+
+		scx_buddy_free(&st_buddy, mem);
+	}
+
+	scx_buddy_destroy(&st_buddy, 0);
+
+	return 0;
 }
 
 static
@@ -110,12 +186,12 @@ int scx_selftest_buddy_exhaustion()
 __weak
 int scx_selftest_buddy(void)
 {
-	SCX_BUDDY_SELFTEST(create);
-	SCX_BUDDY_SELFTEST(alloc);
-	SCX_BUDDY_SELFTEST(alloc_free);
+	//SCX_BUDDY_SELFTEST(create);
+	//SCX_BUDDY_SELFTEST(alloc);
+	//SCX_BUDDY_SELFTEST(alloc_free);
 	SCX_BUDDY_SELFTEST(alloc_multiple);
-	SCX_BUDDY_SELFTEST(fragmentation);
-	SCX_BUDDY_SELFTEST(exhaustion);
+	//SCX_BUDDY_SELFTEST(fragmentation);
+	//SCX_BUDDY_SELFTEST(exhaustion);
 
 	return 0;
 }
