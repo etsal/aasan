@@ -131,7 +131,7 @@ void __arena *idx_to_addr(scx_buddy_chunk_t *chunk, size_t idx)
 }
 
 static
-scx_buddy_header_t *idx_get_header(scx_buddy_chunk_t *chunk, size_t idx)
+scx_buddy_header_t *idx_to_header(scx_buddy_chunk_t *chunk, size_t idx)
 {
 	bool allocated;
 	u64 address;
@@ -170,11 +170,11 @@ scx_buddy_header_t *idx_get_header(scx_buddy_chunk_t *chunk, size_t idx)
 }
 
 static
-int idx_mark_free(scx_buddy_chunk_t *chunk, size_t idx, size_t ord)
+int idx_mark_free(scx_buddy_chunk_t *chunk, size_t idx, u8 ord)
 {
 	scx_buddy_header_t *header;
 
-	header = idx_get_header(chunk, idx);
+	header = idx_to_header(chunk, idx);
 
 	asan_unpoison(header, sizeof(*header));
 
@@ -188,6 +188,69 @@ int idx_mark_free(scx_buddy_chunk_t *chunk, size_t idx, size_t ord)
 	chunk->order_freelists[ord] = idx;
 
 	return idx_set_order(chunk, idx, ord);
+}
+
+static
+int header_to_idx(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u64 *idx)
+{
+	u64 addr = (u64)header - SCX_BUDDY_HEADER_OFF;
+	u64 result;
+
+	result = (addr - (u64)chunk) / SCX_BUDDY_MIN_ALLOC_BYTES;
+	if (result >= SCX_BUDDY_CHUNK_ITEMS) {
+		bpf_printk("failed header to idx translation");
+		return -EINVAL;
+	}
+
+	*idx = result;
+
+	return 0;
+}
+
+static
+int header_add_freelist(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u8 order)
+{
+	scx_buddy_header_t *tmp_header;
+	u64 idx;
+	int ret;
+
+	if ((ret = header_to_idx(chunk, header, &idx)))
+		return ret;
+
+	header->next_index = chunk->order_freelists[order];
+	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
+
+	if (header->next_index != SCX_BUDDY_CHUNK_ITEMS) {
+		tmp_header = idx_to_header(chunk, header->next_index);
+		tmp_header->prev_index = idx;
+	}
+
+	chunk->order_freelists[order] = idx;
+
+	return 0;
+}
+
+static
+void header_remove_freelist(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u8 order)
+{
+	scx_buddy_header_t *tmp_header;
+
+	if (header->prev_index != SCX_BUDDY_CHUNK_ITEMS) {
+		tmp_header = idx_to_header(chunk, header->prev_index);
+		tmp_header->next_index = header->next_index;
+	}
+
+	if (header->next_index != SCX_BUDDY_CHUNK_ITEMS) {
+		tmp_header = idx_to_header(chunk, header->next_index);
+		tmp_header->prev_index = header->prev_index;
+	}
+		
+	/* Pop off the list head if necessary. */
+	if (idx_to_header(chunk, chunk->order_freelists[order]) == header)
+		chunk->order_freelists[order] = header->next_index;
+
+	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
+	header->next_index = SCX_BUDDY_CHUNK_ITEMS;
 }
 
 static
@@ -450,11 +513,11 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 
 
 	retidx = chunk->order_freelists[order];
-	header = idx_get_header(chunk, retidx);
+	header = idx_to_header(chunk, retidx);
 	chunk->order_freelists[order] = header->next_index;
 
 	if (header->next_index != SCX_BUDDY_CHUNK_ITEMS) {
-		next_header = idx_get_header(chunk, header->next_index);
+		next_header = idx_to_header(chunk, header->next_index);
 		next_header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 	}
 
@@ -482,7 +545,7 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 		idx = retidx + (1 << i);
 
 		/* Add the buddy of the allocation to the free list. */
-		header = idx_get_header(chunk, idx);
+		header = idx_to_header(chunk, idx);
 		/* Unpoison the buddy header */
 		asan_unpoison(header, sizeof(*header));
 		if (idx_set_allocated(chunk, idx, false))
@@ -498,7 +561,7 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 		header->next_index = tmpidx;
 
 		if (tmpidx != SCX_BUDDY_CHUNK_ITEMS) {
-			tmp_header = idx_get_header(chunk, tmpidx);
+			tmp_header = idx_to_header(chunk, tmpidx);
 			tmp_header->prev_index = idx;
 		}
 
@@ -572,9 +635,9 @@ done:
 static
 int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 {
-	scx_buddy_header_t *header, *buddy_header, *tmp_header;
-	scx_buddy_chunk_t *chunk, *target_chunk;
-	u64 idx, buddy_idx;
+	scx_buddy_header_t *header, *buddy_header;
+	u64 idx, buddy_idx, tmp_idx;
+	scx_buddy_chunk_t *chunk;
 	bool allocated;
 	u8 order;
 
@@ -587,25 +650,14 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 	}
 
 	/* Align to the chunk boundary. */
-	target_chunk = (void __arena *)(addr & ~SCX_BUDDY_CHUNK_OFFSET_MASK);
-
-	/* XXX Only necessary for debugging. */
-	for (chunk = buddy->first_chunk; chunk != NULL && can_loop; chunk = chunk->next) {
-		if (chunk == target_chunk)
-			break;
-	}
-
-	if (chunk == NULL)
-		return 0;
+	chunk = (void __arena *)(addr & ~SCX_BUDDY_CHUNK_OFFSET_MASK);
 
 	/* Get the page idx. */
 	idx = (addr & SCX_BUDDY_CHUNK_OFFSET_MASK) / SCX_BUDDY_MIN_ALLOC_BYTES;
 
 	idx_set_allocated(chunk, idx, false);
-
 	order = idx_get_order(chunk, idx);
-
-	header = idx_get_header(chunk, idx);
+	header = idx_to_header(chunk, idx);
 
 	/* The header is in the block itself, keep it unpoisoned. */
 	asan_poison((u8 __arena *)addr, BUDDY_POISONED, SCX_BUDDY_MIN_ALLOC_BYTES << order);
@@ -626,34 +678,20 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 		if (idx_get_order(chunk, buddy_idx) != order)
 			break;
 
-		buddy_header = idx_get_header(chunk, buddy_idx);
 
-		if (buddy_header->prev_index != SCX_BUDDY_CHUNK_ITEMS) {
-			tmp_header = idx_get_header(chunk, buddy_header->prev_index);
-			tmp_header->next_index = buddy_header->next_index;
-		}
-
-		if (buddy_header->next_index != SCX_BUDDY_CHUNK_ITEMS) {
-			tmp_header = idx_get_header(chunk, buddy_header->next_index);
-			tmp_header->prev_index = buddy_header->prev_index;
-		}
-			
-		/* Pop off the list head if necessary. */
-		if (chunk->order_freelists[order] == buddy_idx)
-			chunk->order_freelists[order] = buddy_header->next_index;
-
-		buddy_header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
-		buddy_header->next_index = SCX_BUDDY_CHUNK_ITEMS;
-
+		buddy_header = idx_to_header(chunk, buddy_idx);
+		header_remove_freelist(chunk, buddy_header, order);
 		/* Unused headers have no valid order, so do not set it for the buddy. */
 
-		idx = idx < buddy_idx ? idx : buddy_idx;
+		/* Keep the "left" header out of the two buddies. */
+		if (buddy_idx < idx) {
+			tmp_idx = idx;
+			idx = buddy_idx;
+			buddy_idx = tmp_idx;
+		}
 
-		/* Poison the buddy header now that it's unused. */
-		buddy_header = idx_get_header(chunk, buddy_idx);
+		buddy_header = idx_to_header(chunk, buddy_idx);
 		asan_poison(buddy_header, BUDDY_POISONED, sizeof(*buddy_header));
-
-		header = idx_get_header(chunk, idx);
 
 		/*
 		 * order + 1 guaranteed to be < SCX_BUDDY_CHUNK_NUM_ORDERS because the
@@ -662,18 +700,12 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 		 */
 		if (idx_set_order(chunk, idx, order + 1))
 			return 0;
+
+		header = idx_to_header(chunk, idx);
 	}
 
 	order = idx_get_order(chunk, idx);
-	header->next_index = chunk->order_freelists[order];
-	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
-
-	if (header->next_index != SCX_BUDDY_CHUNK_ITEMS) {
-		tmp_header = idx_get_header(chunk, header->next_index);
-		tmp_header->prev_index = idx;
-	}
-
-	chunk->order_freelists[order] = idx;
+	header_add_freelist(chunk, header, order);
 
 	return 0;
 }
