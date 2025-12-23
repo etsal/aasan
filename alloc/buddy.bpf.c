@@ -614,16 +614,16 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 	bpf_for(order, order, SCX_BUDDY_CHUNK_NUM_ORDERS) {
 		buddy_idx = idx ^ (1 << order);
 
+		/* Check if the buddy is actually free. */
+		idx_is_allocated(chunk, buddy_idx, &allocated);
+		if (allocated)
+			break;
+
 		/* 
 		 * If buddy is not the same order as the chunk
 		 * being freed, then we're done coalescing.
 		 */
 		if (idx_get_order(chunk, buddy_idx) != order)
-			break;
-
-		/* Check if the buddy is actually free. */
-		idx_is_allocated(chunk, buddy_idx, &allocated);
-		if (allocated)
 			break;
 
 		buddy_header = idx_get_header(chunk, buddy_idx);
