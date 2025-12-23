@@ -5,6 +5,12 @@
 
 #define DIAG() (arena_stderr("%s:%d\n", __func__, __LINE__))
 
-int arena_bug_trigger(const char *file, int line);
+static inline void
+arena_bug_trigger(const char *func, const int line)
+{
+	volatile u8 __arena *nullptr = (u8 __arena *)0ULL;
+
+	*nullptr = 0;
+}
 
 #endif /* __ALLOC_COMMON_H__ */

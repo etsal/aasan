@@ -45,7 +45,7 @@ struct scx_buddy_chunk {
 	 */
 	u8			allocated[SCX_BUDDY_CHUNK_ITEMS / 8];
 	/* Freelists for O(1) allocation. */
-	u64			order_freelists[SCX_BUDDY_CHUNK_NUM_ORDERS];
+	u64			freelists[SCX_BUDDY_CHUNK_NUM_ORDERS];
 	scx_buddy_chunk_t	*prev;
 	scx_buddy_chunk_t	*next;
 };

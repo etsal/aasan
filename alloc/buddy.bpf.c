@@ -138,12 +138,12 @@ scx_buddy_header_t *idx_to_header(scx_buddy_chunk_t *chunk, size_t idx)
 	u64 address;
 
 	if (unlikely(idx_is_allocated(chunk, idx, &allocated))) {
-		arena_stderr("accessing invalid idx 0x%lx", idx);
+		arena_stderr("accessing invalid idx 0x%lx\n", idx);
 		return NULL;
 	}
 
 	if (unlikely(allocated)) {
-		arena_stderr("accessing allocated idx 0x%lx as header", idx);
+		arena_stderr("accessing allocated idx 0x%lx as header\n", idx);
 		return NULL;
 	}
 
@@ -195,7 +195,7 @@ void header_add_freelist(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u
 
 	idx_set_order(chunk, idx, order);
 
-	header->next_index = chunk->order_freelists[order];
+	header->next_index = chunk->freelists[order];
 	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 
 	if (header->next_index != SCX_BUDDY_CHUNK_ITEMS) {
@@ -203,7 +203,7 @@ void header_add_freelist(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u
 		tmp_header->prev_index = idx;
 	}
 
-	chunk->order_freelists[order] = idx;
+	chunk->freelists[order] = idx;
 }
 
 static
@@ -222,8 +222,8 @@ void header_remove_freelist(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header
 	}
 		
 	/* Pop off the list head if necessary. */
-	if (idx_to_header(chunk, chunk->order_freelists[order]) == header)
-		chunk->order_freelists[order] = header->next_index;
+	if (idx_to_header(chunk, chunk->freelists[order]) == header)
+		chunk->freelists[order] = header->next_index;
 
 	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 	header->next_index = SCX_BUDDY_CHUNK_ITEMS;
@@ -279,6 +279,11 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy, bool locked)
 
 	/* Unpoison the chunk itself. */
 	asan_unpoison(chunk, sizeof(*chunk));
+
+	/* Mark all freelists as empty. */
+	for (ord = 0; ord < SCX_BUDDY_CHUNK_NUM_ORDERS && can_loop; ord++)
+		chunk->freelists[ord] = SCX_BUDDY_CHUNK_ITEMS;
+
 
 	/*
 	 * Initialize the chunk by carving out the first page to hold the metadata struct above,
@@ -487,7 +492,7 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 	u64 i;
 
 	bpf_for(order, order_req, SCX_BUDDY_CHUNK_NUM_ORDERS) {
-		if (chunk->order_freelists[order] != SCX_BUDDY_CHUNK_ITEMS)
+		if (chunk->freelists[order] != SCX_BUDDY_CHUNK_ITEMS)
 			break;
 	}
 
@@ -495,9 +500,9 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 		return (u64)NULL;
 
 
-	retidx = chunk->order_freelists[order];
+	retidx = chunk->freelists[order];
 	header = idx_to_header(chunk, retidx);
-	chunk->order_freelists[order] = header->next_index;
+	chunk->freelists[order] = header->next_index;
 
 	if (header->next_index != SCX_BUDDY_CHUNK_ITEMS) {
 		next_header = idx_to_header(chunk, header->next_index);
@@ -537,8 +542,8 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 		if (idx_set_order(chunk, idx, i))
 			return (u64)NULL;
 
-		/* Push the header to the beginning of the order_freelists list. */
-		tmpidx = chunk->order_freelists[i];
+		/* Push the header to the beginning of the freelists list. */
+		tmpidx = chunk->freelists[i];
 
 		header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 		header->next_index = tmpidx;
@@ -548,7 +553,7 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 			tmp_header->prev_index = idx;
 		}
 
-		chunk->order_freelists[i] = idx;
+		chunk->freelists[i] = idx;
 	}
 
 	return address;
@@ -609,8 +614,6 @@ done:
 	asan_unpoison((u8 __arena *)address, size);
 
 	scx_buddy_unlock(buddy);
-
-	DIAG();
 
 	return address;
 }
