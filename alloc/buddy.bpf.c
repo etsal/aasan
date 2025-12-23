@@ -170,28 +170,6 @@ scx_buddy_header_t *idx_to_header(scx_buddy_chunk_t *chunk, size_t idx)
 	return (scx_buddy_header_t *)(address + SCX_BUDDY_HEADER_OFF);
 }
 
-static
-int idx_mark_free(scx_buddy_chunk_t *chunk, size_t idx, u8 ord)
-{
-	scx_buddy_header_t *header;
-
-	header = idx_to_header(chunk, idx);
-	if (unlikely(!header))
-		return -EINVAL;
-
-	asan_unpoison(header, sizeof(*header));
-
-	idx_set_allocated(chunk, idx, false);
-
-	/* Add to the freelists. */
-	header->next_index = SCX_BUDDY_CHUNK_ITEMS;
-	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
-
-	/* Mark it free. */
-	chunk->order_freelists[ord] = idx;
-
-	return idx_set_order(chunk, idx, ord);
-}
 
 static
 int header_to_idx(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u64 *idx)
@@ -214,6 +192,8 @@ static
 void header_add_freelist(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u64 idx, u8 order)
 {
 	scx_buddy_header_t *tmp_header;
+
+	idx_set_order(chunk, idx, order);
 
 	header->next_index = chunk->order_freelists[order];
 	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
@@ -276,6 +256,7 @@ static
 scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy, bool locked)
 {
 	u64 order, ord, min_order, max_order;
+	scx_buddy_header_t *header;
 	scx_buddy_chunk_t *chunk;
 	u32 idx, cur_idx;
 	size_t left;
@@ -392,8 +373,14 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy, bool locked)
 			/* Mark the buddy as free and add it to the freelists. */
 			idx = cur_idx + (1 << ord);
 
-			if (idx_mark_free(chunk, idx, ord))
+			header = idx_to_header(chunk, idx);
+			if (unlikely(!header))
 				goto error;
+
+			asan_unpoison(header, sizeof(*header));
+
+			idx_set_allocated(chunk, idx, false);
+			header_add_freelist(chunk, header, idx, ord);
 		}
 
 		/* Adjust the index. */
