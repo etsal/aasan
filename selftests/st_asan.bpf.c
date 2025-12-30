@@ -11,6 +11,7 @@
 #include <alloc/buddy.h>
 #include <alloc/stack.h>
 #include <alloc/static.h>
+#include <alloc/common.h>
 
 #include "selftest.h"
 
@@ -32,7 +33,7 @@ do {									\
 do { 						\
 	asm volatile ("" ::: "memory");		\
 	if ((asan_violated != 0) != (cond)) { 	\
-		bpf_printk("ASAN asan_violated %lx", (u64)asan_violated); \
+		bpf_printk("%s:%d ASAN asan_violated %lx", __func__, __LINE__, (u64)asan_violated); \
 		ASAN_MAP_STATE((addr)); 	\
 		return -EINVAL;			\
 	}					\
@@ -446,11 +447,16 @@ int asan_test_buddy_oob_single(size_t alloc_size)
 	u8 __arena *mem;
 	int i;
 
+	ASAN_VALIDATE();
+
 	mem = scx_buddy_alloc(&st_buddy_asan, alloc_size);
 	if (!mem) {
 		bpf_printk("scx_buddy_alloc failed for size %lu", alloc_size);
 		return -ENOMEM;
 	}
+
+	bpf_printk("Memory returned: %lx", mem);
+	ASAN_VALIDATE();
 
 	bpf_for(i, 0, alloc_size) {
 		mem[i] = 0xba;
@@ -477,14 +483,24 @@ int asan_test_buddy_uaf_single(size_t alloc_size)
 		return -ENOMEM;
 	}
 
+	ASAN_VALIDATE();
+
 	bpf_for(i, 0, alloc_size) {
+		arena_stderr("(%d) %s:%d [%d]\n", alloc_size, __func__, __LINE__, i);
 		mem[i] = 0xba;
 		ASAN_VALIDATE_ADDR(false, &mem[i]);
 	}
 
+	ASAN_VALIDATE();
+
 	scx_buddy_free(&st_buddy_asan, mem);
 
 	bpf_for(i, 0, alloc_size) {
+		/* The header doesn't get poisoned. */
+		if (SCX_BUDDY_HEADER_OFF <= i && i < SCX_BUDDY_HEADER_OFF + sizeof(struct scx_buddy_header))
+			continue;
+
+		arena_stderr("(%d) %s:%d [%d]\n", alloc_size, __func__, __LINE__, i);
 		mem[i] = 0xba;
 		ASAN_VALIDATE_ADDR(true, &mem[i]);
 	}
