@@ -34,12 +34,13 @@ int scx_selftest_buddy_create()
 	int ret, i;
 
 	for (i = 0; i < iters && can_loop; i++) {
-		ret = scx_buddy_init(&st_buddy, SCX_BUDDY_MIN_ALLOC_BYTES,
-				     (arena_spinlock_t __arena *)&st_buddy_lock);
+		ret = scx_buddy_init(&st_buddy, (arena_spinlock_t __arena *)&st_buddy_lock);
 		if (ret)
 			return ret;
 
-		ret = scx_buddy_destroy(&st_buddy, 0);
+		arena_stderr("%s:%d [%d]\n", __func__, __LINE__, i);
+
+		ret = scx_buddy_destroy(&st_buddy);
 		if (ret)
 			return ret;
 	}
@@ -54,18 +55,17 @@ int scx_selftest_buddy_alloc()
 	int ret, i;
 
 	for (i = 0; i < 8 && can_loop; i++) {
-		ret = scx_buddy_init(&st_buddy, SCX_BUDDY_MIN_ALLOC_BYTES,
-				     (arena_spinlock_t __arena *)&st_buddy_lock);
+		ret = scx_buddy_init(&st_buddy, (arena_spinlock_t __arena *)&st_buddy_lock);
 		if (ret)
 			return ret;
 
 		mem = scx_buddy_alloc(&st_buddy, sizes[i]);
 		if (!mem) {
-			scx_buddy_destroy(&st_buddy, 0);
+			scx_buddy_destroy(&st_buddy);
 			return -ENOMEM;
 		}
 
-		scx_buddy_destroy(&st_buddy, 0);
+		scx_buddy_destroy(&st_buddy);
 	}
 
 	return 0;
@@ -79,22 +79,21 @@ int scx_selftest_buddy_alloc_free()
 	void __arena *mem;
 	int ret, i;
 
-	ret = scx_buddy_init(&st_buddy, SCX_BUDDY_MIN_ALLOC_BYTES,
-			     (arena_spinlock_t __arena *)&st_buddy_lock);
+	ret = scx_buddy_init(&st_buddy, (arena_spinlock_t __arena *)&st_buddy_lock);
 	if (ret)
 		return ret;
 
 	bpf_for(i, 0, iters) {
 		mem = scx_buddy_alloc(&st_buddy, sizes[(i * 5) % 8]);
 		if (!mem) {
-			scx_buddy_destroy(&st_buddy, 0);
+			scx_buddy_destroy(&st_buddy);
 			return -ENOMEM;
 		}
 
 		scx_buddy_free(&st_buddy, mem);
 	}
 
-	scx_buddy_destroy(&st_buddy, 0);
+	scx_buddy_destroy(&st_buddy);
 
 	return 0;
 }
@@ -108,8 +107,7 @@ int scx_selftest_buddy_alloc_multiple()
 	size_t sz;
 	u8 poison;
 
-	ret = scx_buddy_init(&st_buddy, SCX_BUDDY_MIN_ALLOC_BYTES,
-			     (arena_spinlock_t __arena *)&st_buddy_lock);
+	ret = scx_buddy_init(&st_buddy, (arena_spinlock_t __arena *)&st_buddy_lock);
 	if (ret)
 		return ret;
 
@@ -121,13 +119,14 @@ int scx_selftest_buddy_alloc_multiple()
 	 * segarr entry. Use the poison value to poison the entire
 	 * allocated memory according to the size given.
 	 */
+	idx = 0;
 	bpf_for(i, 0, SEGARRLEN) {
 		sz = sizes[idx % 9];
 		poison = (u8)i;
 
 		mem = scx_buddy_alloc(&st_buddy, sz);
 		if (!mem) {
-			scx_buddy_destroy(&st_buddy, 0);
+			scx_buddy_destroy(&st_buddy);
 			bpf_printk("%s:%d", __func__, __LINE__);
 			return -ENOMEM;
 		}
@@ -139,7 +138,7 @@ int scx_selftest_buddy_alloc_multiple()
 		bpf_for(j, 0, sz) {
 			mem[j] = poison;
 			if (mem[j] != poison) {
-				scx_buddy_destroy(&st_buddy, 0);
+				scx_buddy_destroy(&st_buddy);
 				return -EINVAL;
 			}
 		}
@@ -161,7 +160,7 @@ int scx_selftest_buddy_alloc_multiple()
 
 		bpf_for(j, 0, sz) {
 			if (mem[j] != poison) {
-				scx_buddy_destroy(&st_buddy, 0);
+				scx_buddy_destroy(&st_buddy);
 				bpf_printk("%s:%d %lx %u vs %u", __func__, __LINE__, &mem[j], mem[j], poison);
 				return -EINVAL;
 			}
@@ -170,7 +169,7 @@ int scx_selftest_buddy_alloc_multiple()
 		scx_buddy_free(&st_buddy, mem);
 	}
 
-	scx_buddy_destroy(&st_buddy, 0);
+	scx_buddy_destroy(&st_buddy);
 
 	return 0;
 }
@@ -182,8 +181,7 @@ int scx_selftest_buddy_alignment()
 	void __arena *ptrs[17];
 	int ret, i;
 
-	ret = scx_buddy_init(&st_buddy, SCX_BUDDY_MIN_ALLOC_BYTES,
-			     (arena_spinlock_t __arena *)&st_buddy_lock);
+	ret = scx_buddy_init(&st_buddy, (arena_spinlock_t __arena *)&st_buddy_lock);
 	if (ret)
 		return ret;
 
@@ -192,7 +190,7 @@ int scx_selftest_buddy_alignment()
 		ptrs[i] = scx_buddy_alloc(&st_buddy, sizes[i]);
 		if (!ptrs[i]) {
 			bpf_printk("alignment test: alloc failed for size %lu", sizes[i]);
-			scx_buddy_destroy(&st_buddy, 0);
+			scx_buddy_destroy(&st_buddy);
 			return -ENOMEM;
 		}
 
@@ -200,7 +198,7 @@ int scx_selftest_buddy_alignment()
 		if ((u64)ptrs[i] & 0x7) {
 			bpf_printk("alignment test: ptr %llx not 8-byte aligned (size %lu)",
 				   (u64)ptrs[i], sizes[i]);
-			scx_buddy_destroy(&st_buddy, 0);
+			scx_buddy_destroy(&st_buddy);
 			return -EINVAL;
 		}
 	}
@@ -210,7 +208,7 @@ int scx_selftest_buddy_alignment()
 		scx_buddy_free(&st_buddy, ptrs[i]);
 	}
 
-	scx_buddy_destroy(&st_buddy, 0);
+	scx_buddy_destroy(&st_buddy);
 
 	return 0;
 }
@@ -232,9 +230,9 @@ int scx_selftest_buddy_exhaustion()
 __weak
 int scx_selftest_buddy(void)
 {
-	//SCX_BUDDY_SELFTEST(create);
-	//SCX_BUDDY_SELFTEST(alloc);
-	//SCX_BUDDY_SELFTEST(alloc_free);
+	SCX_BUDDY_SELFTEST(create);
+	SCX_BUDDY_SELFTEST(alloc);
+	SCX_BUDDY_SELFTEST(alloc_free);
 	SCX_BUDDY_SELFTEST(alloc_multiple);
 	SCX_BUDDY_SELFTEST(alignment);
 	//SCX_BUDDY_SELFTEST(fragmentation);

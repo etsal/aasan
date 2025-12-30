@@ -45,8 +45,6 @@ enum {
 	BUDDY_POISONED 		= (s8)0xef,
 };
 
-static size_t vaddr_offset;
-
 static inline int
 scx_buddy_lock(struct scx_buddy *buddy)
 {
@@ -59,14 +57,15 @@ scx_buddy_unlock(struct scx_buddy *buddy)
 	arena_spin_unlock(buddy->lock);
 }
 
-
 /*
  * Reserve part of the arena address space for the allocator. We use
  * this to get aligned addresses for the chunks.
  */
 static int
-scx_reserve_arena_vaddr(void)
+scx_reserve_arena_vaddr(struct scx_buddy *buddy)
 {
+	buddy->vaddr = 0;
+
 	return bpf_arena_reserve_pages(&arena, (void __arena *)SCX_BUDDY_VADDR_OFFSET,
 			SCX_BUDDY_VADDR_SIZE / PAGE_SIZE);
 }
@@ -75,27 +74,28 @@ scx_reserve_arena_vaddr(void)
  * Free up any unused address space. Used only during teardown.
  */
 static void
-scx_unreserve_arena_vaddr(void)
+scx_unreserve_arena_vaddr(struct scx_buddy *buddy)
 {
-	bpf_arena_free_pages(&arena, (void __arena *)SCX_BUDDY_VADDR_OFFSET + vaddr_offset,
-			SCX_BUDDY_VADDR_SIZE / PAGE_SIZE);
-	
+	bpf_arena_free_pages(&arena, (void __arena *)(SCX_BUDDY_VADDR_OFFSET + buddy->vaddr),
+			(SCX_BUDDY_VADDR_SIZE - buddy->vaddr) / PAGE_SIZE);
+
+	buddy->vaddr = 0;
 }
 
 /* Carve out part of the reserved address space and allocate it to the */
 static int
-scx_alloc_arena_vaddr(u64 *vaddrp)
+scx_alloc_arena_vaddr(struct scx_buddy *buddy, u64 *vaddrp)
 {
 	u64 vaddr, old, new;
 
 	do {
-		vaddr = vaddr_offset;
+		vaddr = buddy->vaddr;
 		new = vaddr + SCX_BUDDY_CHUNK_BYTES;
 
 		if (new > SCX_BUDDY_VADDR_SIZE)
 			return -EINVAL;
 
-		old = __sync_val_compare_and_swap(&vaddr_offset, vaddr, new);
+		old = __sync_val_compare_and_swap(&buddy->vaddr, vaddr, new);
 	} while (old != vaddr && can_loop);
 
 	if (old != vaddr)
@@ -362,7 +362,7 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy)
 
 	scx_buddy_unlock(buddy);
 
-	ret = scx_alloc_arena_vaddr(&vaddr);
+	ret = scx_alloc_arena_vaddr(buddy, &vaddr);
 	if (ret) {
 		DIAG();
 		return NULL;
@@ -382,6 +382,8 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy)
 		arena_stderr("[ALLOC FAILED]");
 		return NULL;
 	}
+
+	arena_stderr("[ALLOCATED] %lx", vaddr);
 
 	if ((ret = scx_buddy_lock(buddy))) {
 		bpf_arena_free_pages(&arena, chunk, SCX_BUDDY_CHUNK_PAGES);
@@ -514,52 +516,45 @@ error:
 }
 
 __hidden
-int scx_buddy_init(struct scx_buddy *buddy, size_t size, arena_spinlock_t __arg_arena __arena *lock)
+int scx_buddy_init(struct scx_buddy *buddy, arena_spinlock_t __arg_arena __arena *lock)
 {
 	scx_buddy_chunk_t *chunk;
 	int ret;
 
-	/* Set a minimum allocation size. */
-	if (size < SCX_BUDDY_MIN_ALLOC_BYTES)
-		return -EINVAL;
-
-	/* Check if already initialized. */
-	if (buddy->min_alloc_bytes)
-		return -EALREADY;
-
-	buddy->min_alloc_bytes = size;
 	buddy->lock = lock;
 
 	/* 
 	 * Reserve enough address space to ensure allocations are aligned.
 	 */
-	if ((ret = scx_reserve_arena_vaddr()))
+	if ((ret = scx_reserve_arena_vaddr(buddy))) {
+		DIAG();
 		return ret;
+	}
 
 	_Static_assert(SCX_BUDDY_CHUNK_PAGES > 0, "chunk must use one or more pages");
 
 	/* Chunk is already properly unpoisoned if allocated. */
-	if (scx_buddy_lock(buddy))
+	if (scx_buddy_lock(buddy)) {
+		DIAG();
 		return -EINVAL;
+	}
 
 	chunk = scx_buddy_chunk_get(buddy);
-
-	if (chunk) {
-		/* Put the chunk at the beginning of the list. */
-		chunk->next = buddy->first_chunk;
-		chunk->prev = NULL;
-		buddy->first_chunk = chunk;
-
-		scx_buddy_unlock(buddy);
-	} else {
-		/* Mark as uninitialized. */
-		buddy->min_alloc_bytes = 0;
+	if (!chunk) {
 		buddy->first_chunk = NULL;
+		return -ENOMEM;
 	}
+
+	/* Put the chunk at the beginning of the list. */
+	chunk->next = buddy->first_chunk;
+	chunk->prev = NULL;
+	buddy->first_chunk = chunk;
+
+	scx_buddy_unlock(buddy);
 
 	arena_stderr("[INIT] CHUNK %lx\n", chunk);
 
-	return chunk ? 0 : -ENOMEM;
+	return 0;
 }
 
 /*
@@ -569,7 +564,7 @@ int scx_buddy_init(struct scx_buddy *buddy, size_t size, arena_spinlock_t __arg_
  * be using the allocator at that point in the execution.
  */
 __weak
-int scx_buddy_destroy(struct scx_buddy *buddy, size_t size)
+int scx_buddy_destroy(struct scx_buddy *buddy)
 {
 	scx_buddy_chunk_t *chunk, *next;
 
@@ -585,15 +580,16 @@ int scx_buddy_destroy(struct scx_buddy *buddy, size_t size)
 
 		/* Wholesale poison the entire block. */
 		asan_poison(chunk, BUDDY_POISONED, SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE);
+		arena_stderr("[FREE] %lx\n", chunk);
 		bpf_arena_free_pages(&arena, chunk, SCX_BUDDY_CHUNK_PAGES);
 	}
 
 	/* Free up any part of the address space that did not get used. */
-	scx_unreserve_arena_vaddr();
+	scx_unreserve_arena_vaddr(buddy);
 
+	arena_stderr("[DESTROY]\n");
 	/* Clear all fields. */
 	buddy->first_chunk = NULL;
-	buddy->min_alloc_bytes = 0;
 
 	return 0;
 }
@@ -607,7 +603,6 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 	u64 order = 0;
 	u64 i;
 
-	arena_stderr("[CHUNK ALLOC] %lx\n", chunk);
 	ASAN_VALIDATE_STOP();
 
 	bpf_for(order, order_req, SCX_BUDDY_CHUNK_NUM_ORDERS) {
@@ -714,10 +709,7 @@ u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size)
 
 	ASAN_VALIDATE_LOCKED();
 
-	int i = 0;
 	for (chunk = buddy->first_chunk; chunk != NULL && can_loop; chunk = chunk->next) {
-		arena_stderr("[ALLOC_INTERNAL %d] %lx\n", i++, chunk);
-
 		address = scx_buddy_chunk_alloc(chunk, order);
 		if (address)
 			goto done;

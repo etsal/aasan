@@ -54,21 +54,18 @@ struct scx_buddy_chunk {
 
 struct scx_buddy {
 	scx_buddy_chunk_t *first_chunk;		/* Pointer to the chunk linked list. */
-	size_t min_alloc_bytes;			/* Minimum allocation in bytes */
 	arena_spinlock_t __arena *lock;		/* Allocator lock */
-
-	/* XXXETSAL: Track used pages, used to drain the underlying page stack. */
+	u64 vaddr;				/* Allocation into reserved vaddr */
 };
 
 #ifdef __BPF__
 
-int scx_buddy_init(struct scx_buddy *buddy, size_t size, arena_spinlock_t __arena *lock);
-int scx_buddy_destroy(struct scx_buddy *buddy, size_t size);
+int scx_buddy_init(struct scx_buddy *buddy, arena_spinlock_t __arena *lock);
+int scx_buddy_destroy(struct scx_buddy *buddy);
 int scx_buddy_free_internal(struct scx_buddy *buddy, u64 free);
 #define scx_buddy_free(buddy, ptr) do { scx_buddy_free_internal((buddy), (u64)(ptr)); } while (0)
 u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size);
 #define scx_buddy_alloc(alloc, size) ((void __arena *)scx_buddy_alloc_internal((alloc), (size)))
-int scx_buddy_destroy(struct scx_buddy *buddy, size_t size);
 
 
 #endif /* __BPF__  */

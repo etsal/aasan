@@ -432,7 +432,7 @@ int main(int argc, char *argv[])
 			verbose = true;
 	}
 
-//	run_test(selftest_alloc);
+	run_test(selftest_alloc);
 	run_test(selftest_asan);
 
 	return 0;
