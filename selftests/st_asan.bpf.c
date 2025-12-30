@@ -455,7 +455,6 @@ int asan_test_buddy_oob_single(size_t alloc_size)
 		return -ENOMEM;
 	}
 
-	bpf_printk("Memory returned: %lx", mem);
 	ASAN_VALIDATE();
 
 	bpf_for(i, 0, alloc_size) {
@@ -541,23 +540,19 @@ int asan_test_buddy_oob(void)
 	size_t sizes[] = { 7, 8, 17, 18, 64, 256, 317, 512, 1024, };
 	int ret, i;
 
-	arena_stderr("[INIT STARTING] %s:%d\n", __func__, __LINE__);
 	ret = scx_buddy_init(&st_buddy_asan, (arena_spinlock_t __arena *)&st_asan_lock);
 	if (ret) {
 		bpf_printk("scx_buddy_init failed with %d", ret);
 		return ret;
 	}
-	arena_stderr("[INIT DONE] %s:%d\n", __func__, __LINE__);
 
 	bpf_for(i, 0, 7) {
-		arena_stderr("[ITER %d] %s:%d\n", i, __func__, __LINE__);
 		ret = asan_test_buddy_oob_single(sizes[i]);
 		if (ret) {
 			bpf_printk("%s:%d Failed for size %lu", __func__, __LINE__, sizes[i]);
 			scx_buddy_destroy(&st_buddy_asan);
 			return ret;
 		}
-		arena_stderr ("[ITER %d] %s:%d\n", i, __func__, __LINE__);
 	}
 
 	scx_buddy_destroy(&st_buddy_asan);
@@ -580,7 +575,6 @@ int asan_test_buddy_uaf(void)
 	}
 
 	bpf_for(i, 0, 7) {
-		arena_stderr("[ITER %d] %s:%d\n", i, __func__, __LINE__);
 		ret = asan_test_buddy_uaf_single(sizes[i]);
 		if (ret) {
 			bpf_printk("%s:%d Failed for size %lu", __func__, __LINE__, sizes[i]);
@@ -608,8 +602,6 @@ int asan_test_buddy_blob(void)
 		return ret;
 	}
 
-	bpf_printk("%s:%d", __func__, __LINE__);
-
 	for (i = 0; i < iters && can_loop; i++) {
 		ret = asan_test_buddy_blob_single();
 		if (ret) {
@@ -617,10 +609,8 @@ int asan_test_buddy_blob(void)
 			scx_buddy_destroy(&st_buddy_asan);
 			return ret;
 		}
-		bpf_printk("%s:%d", __func__, __LINE__);
 	}
 
-	bpf_printk("%s:%d", __func__, __LINE__);
 	scx_buddy_destroy(&st_buddy_asan);
 
 	ASAN_VALIDATE();

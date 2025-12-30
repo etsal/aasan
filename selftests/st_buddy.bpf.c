@@ -38,8 +38,6 @@ int scx_selftest_buddy_create()
 		if (ret)
 			return ret;
 
-		arena_stderr("%s:%d [%d]\n", __func__, __LINE__, i);
-
 		ret = scx_buddy_destroy(&st_buddy);
 		if (ret)
 			return ret;
@@ -213,18 +211,6 @@ int scx_selftest_buddy_alignment()
 	return 0;
 }
 
-static
-int scx_selftest_buddy_fragmentation()
-{
-	return -EOPNOTSUPP;
-}
-
-static
-int scx_selftest_buddy_exhaustion()
-{
-	return -EOPNOTSUPP;
-}
-
 #define SCX_BUDDY_SELFTEST(suffix) SCX_SELFTEST(scx_selftest_buddy_ ## suffix)
 
 __weak
@@ -235,8 +221,6 @@ int scx_selftest_buddy(void)
 	SCX_BUDDY_SELFTEST(alloc_free);
 	SCX_BUDDY_SELFTEST(alloc_multiple);
 	SCX_BUDDY_SELFTEST(alignment);
-	//SCX_BUDDY_SELFTEST(fragmentation);
-	//SCX_BUDDY_SELFTEST(exhaustion);
 
 	return 0;
 }

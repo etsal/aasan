@@ -9,38 +9,6 @@
 #include <lib/sdt_task.h>
 #include <alloc/common.h>
 
-int line;
-int problemidx;
-int problemorder;
-
-#define ASAN_VALIDATE_STOP() 						\
-do { 									\
-	if ((asan_violated)) { 						\
-		line = __LINE__;					\
-		return 0ULL;						\
-	}								\
-} while (0)
-
-#define ASAN_VALIDATE() 						\
-do { 									\
-	if ((asan_violated)) { 						\
-		bpf_printk("%s:%d Found ASAN violation at %lx", 	\
-				__func__, __LINE__, asan_violated); 	\
-		return -EINVAL;						\
-	}								\
-} while (0)
-
-#define ASAN_VALIDATE_LOCKED() 						\
-do { 									\
-	if ((asan_violated)) { 						\
-		scx_buddy_unlock(buddy);				\
-		bpf_printk("%s:%d Found ASAN violation at %lx", 	\
-				__func__, __LINE__, asan_violated); 	\
-		return -EINVAL;						\
-	}								\
-} while (0)
-
-
 enum {
 	BUDDY_POISONED 		= (s8)0xef,
 };
@@ -266,24 +234,6 @@ scx_buddy_header_t *idx_to_header(scx_buddy_chunk_t *chunk, size_t idx)
 	return (scx_buddy_header_t *)(address + SCX_BUDDY_HEADER_OFF);
 }
 
-
-static
-int header_to_idx(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u64 *idx)
-{
-	u64 addr = (u64)header - SCX_BUDDY_HEADER_OFF;
-	u64 result;
-
-	result = (addr - (u64)chunk) / SCX_BUDDY_MIN_ALLOC_BYTES;
-	if (result >= SCX_BUDDY_CHUNK_ITEMS) {
-		bpf_printk("failed header to idx translation");
-		return -EINVAL;
-	}
-
-	*idx = result;
-
-	return 0;
-}
-
 static
 void header_add_freelist(scx_buddy_chunk_t *chunk, scx_buddy_header_t *header, u64 idx, u8 order)
 {
@@ -382,8 +332,6 @@ scx_buddy_chunk_t *scx_buddy_chunk_get(struct scx_buddy *buddy)
 		arena_stderr("[ALLOC FAILED]");
 		return NULL;
 	}
-
-	arena_stderr("[ALLOCATED] %lx", vaddr);
 
 	if ((ret = scx_buddy_lock(buddy))) {
 		bpf_arena_free_pages(&arena, chunk, SCX_BUDDY_CHUNK_PAGES);
@@ -552,8 +500,6 @@ int scx_buddy_init(struct scx_buddy *buddy, arena_spinlock_t __arg_arena __arena
 
 	scx_buddy_unlock(buddy);
 
-	arena_stderr("[INIT] CHUNK %lx\n", chunk);
-
 	return 0;
 }
 
@@ -580,14 +526,12 @@ int scx_buddy_destroy(struct scx_buddy *buddy)
 
 		/* Wholesale poison the entire block. */
 		asan_poison(chunk, BUDDY_POISONED, SCX_BUDDY_CHUNK_PAGES * PAGE_SIZE);
-		arena_stderr("[FREE] %lx\n", chunk);
 		bpf_arena_free_pages(&arena, chunk, SCX_BUDDY_CHUNK_PAGES);
 	}
 
 	/* Free up any part of the address space that did not get used. */
 	scx_unreserve_arena_vaddr(buddy);
 
-	arena_stderr("[DESTROY]\n");
 	/* Clear all fields. */
 	buddy->first_chunk = NULL;
 
@@ -603,43 +547,30 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 	u64 order = 0;
 	u64 i;
 
-	ASAN_VALIDATE_STOP();
-
 	bpf_for(order, order_req, SCX_BUDDY_CHUNK_NUM_ORDERS) {
 		if (chunk->freelists[order] != SCX_BUDDY_CHUNK_ITEMS)
 			break;
 	}
 
-	ASAN_VALIDATE_STOP();
 	if (order >= SCX_BUDDY_CHUNK_NUM_ORDERS)
 		return (u64)NULL;
 
-	ASAN_VALIDATE_STOP();
-
 	retidx = chunk->freelists[order];
 	header = idx_to_header(chunk, retidx);
-	//asan_unpoison(header, sizeof(*header));
 	chunk->freelists[order] = header->next_index;
-	problemidx = retidx;
-	problemorder = order;
 
-	ASAN_VALIDATE_STOP();
 	if (header->next_index != SCX_BUDDY_CHUNK_ITEMS) {
 		next_header = idx_to_header(chunk, header->next_index);
 		next_header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 	}
-	ASAN_VALIDATE_STOP();
 
 	header->prev_index = SCX_BUDDY_CHUNK_ITEMS;
 	header->next_index = SCX_BUDDY_CHUNK_ITEMS;
 	if (idx_set_order(chunk, retidx, order_req))
 		return (u64)NULL;
 
-	ASAN_VALIDATE_STOP();
 	if (idx_set_allocated(chunk, retidx, true))
 		return (u64)NULL;
-
-	ASAN_VALIDATE_STOP();
 
 	/* 
 	 * Do not unpoison the address yet, will be done by the caller
@@ -649,7 +580,6 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 
 	/* If we allocated from a larger-order chunk, split the buddies. */
 	bpf_for(i, order_req, order) {
-		ASAN_VALIDATE_STOP();
 		/* 
 		 * Flip the bit for the current order (the bit is guaranteed
 		 * to be 0, so just add 1 << i). 
@@ -663,11 +593,9 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 		if (idx_set_allocated(chunk, idx, false))
 			return (u64)NULL;
 
-		ASAN_VALIDATE_STOP();
 		if (idx_set_order(chunk, idx, i))
 			return (u64)NULL;
 
-		ASAN_VALIDATE_STOP();
 		/* Push the header to the beginning of the freelists list. */
 		tmpidx = chunk->freelists[i];
 
@@ -679,11 +607,9 @@ u64 scx_buddy_chunk_alloc(scx_buddy_chunk_t __arg_arena *chunk, int order_req)
 			tmp_header->prev_index = idx;
 		}
 
-		ASAN_VALIDATE_STOP();
 		chunk->freelists[i] = idx;
 	}
 
-	ASAN_VALIDATE_STOP();
 	return address;
 }
 
@@ -706,30 +632,16 @@ u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size)
 	if (scx_buddy_lock(buddy))
 		return (u64)NULL;
 
-
-	ASAN_VALIDATE_LOCKED();
-
 	for (chunk = buddy->first_chunk; chunk != NULL && can_loop; chunk = chunk->next) {
 		address = scx_buddy_chunk_alloc(chunk, order);
 		if (address)
 			goto done;
-
-		if (line) {
-			scx_buddy_unlock(buddy);
-			bpf_printk("Problem in line %d idx 0x%lx order %d", line, problemidx, problemorder);
-			return (u64)NULL;
-		}
-
-		line = 0;
-		ASAN_VALIDATE_LOCKED();
 	}
 
 	/* Get a new chunk. */
 	chunk = scx_buddy_chunk_get(buddy);
 	if (!chunk)
 		return (u64)NULL;
-
-	ASAN_VALIDATE_LOCKED();
 
 	/* Add the chunk into the allocator and retry. */
 	chunk->next = buddy->first_chunk;
@@ -738,17 +650,7 @@ u64 scx_buddy_alloc_internal(struct scx_buddy *buddy, size_t size)
 
 	address = scx_buddy_chunk_alloc(buddy->first_chunk, order);
 
-	if (line) {
-		scx_buddy_unlock(buddy);
-		bpf_printk("Problem in line %d", line);
-		return (u64)NULL;
-	}
-
-	line = 0;
-
 done:
-
-	ASAN_VALIDATE_LOCKED();
 
 	if (!address) {
 		scx_buddy_unlock(buddy);
@@ -767,10 +669,6 @@ done:
 
 	scx_buddy_unlock(buddy);
 
-	ASAN_VALIDATE();
-
-	bpf_printk("Allocation of %lx (size %ld, order %ld)", address, size, order);
-	bpf_printk("IDX %x ORDER %d", problemidx, problemorder);
 	return address;
 }
 
@@ -802,7 +700,6 @@ int scx_buddy_free_unlocked(struct scx_buddy *buddy, u64 addr)
 	header = idx_to_header(chunk, idx);
 
 	/* The header is in the block itself, keep it unpoisoned. */
-	bpf_printk("Freeing %lx index %lx, order %d, bytes %d", addr, idx, order, SCX_BUDDY_MIN_ALLOC_BYTES << order);
 	asan_poison((u8 __arena *)addr, BUDDY_POISONED, SCX_BUDDY_MIN_ALLOC_BYTES << order);
 	asan_unpoison(header, sizeof(*header));
 
