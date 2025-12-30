@@ -176,6 +176,46 @@ int scx_selftest_buddy_alloc_multiple()
 }
 
 static
+int scx_selftest_buddy_alignment()
+{
+	size_t sizes[] = { 1, 3, 7, 8, 9, 15, 16, 17, 31, 32, 64, 100, 128, 255, 256, 512, 1000 };
+	void __arena *ptrs[17];
+	int ret, i;
+
+	ret = scx_buddy_init(&st_buddy, SCX_BUDDY_MIN_ALLOC_BYTES,
+			     (arena_spinlock_t __arena *)&st_buddy_lock);
+	if (ret)
+		return ret;
+
+	/* Allocate various sizes and check alignment */
+	bpf_for(i, 0, 17) {
+		ptrs[i] = scx_buddy_alloc(&st_buddy, sizes[i]);
+		if (!ptrs[i]) {
+			bpf_printk("alignment test: alloc failed for size %lu", sizes[i]);
+			scx_buddy_destroy(&st_buddy, 0);
+			return -ENOMEM;
+		}
+
+		/* Check 8-byte alignment */
+		if ((u64)ptrs[i] & 0x7) {
+			bpf_printk("alignment test: ptr %llx not 8-byte aligned (size %lu)",
+				   (u64)ptrs[i], sizes[i]);
+			scx_buddy_destroy(&st_buddy, 0);
+			return -EINVAL;
+		}
+	}
+
+	/* Free all allocations */
+	bpf_for(i, 0, 17) {
+		scx_buddy_free(&st_buddy, ptrs[i]);
+	}
+
+	scx_buddy_destroy(&st_buddy, 0);
+
+	return 0;
+}
+
+static
 int scx_selftest_buddy_fragmentation()
 {
 	return -EOPNOTSUPP;
@@ -196,6 +236,7 @@ int scx_selftest_buddy(void)
 	//SCX_BUDDY_SELFTEST(alloc);
 	//SCX_BUDDY_SELFTEST(alloc_free);
 	SCX_BUDDY_SELFTEST(alloc_multiple);
+	SCX_BUDDY_SELFTEST(alignment);
 	//SCX_BUDDY_SELFTEST(fragmentation);
 	//SCX_BUDDY_SELFTEST(exhaustion);
 
